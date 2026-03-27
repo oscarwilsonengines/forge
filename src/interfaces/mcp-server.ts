@@ -10,6 +10,7 @@ import { StateManager } from "../core/state-manager.js";
 import { Scheduler } from "../core/scheduler.js";
 import { Notifier } from "../core/notifier.js";
 import { LocalEngine } from "../execution/local-engine.js";
+import { RemoteEngine } from "../execution/remote-engine.js";
 import { GitHubManager } from "../github/manager.js";
 import { ReviewPipeline } from "../review/pipeline.js";
 import type { ForgeConfig, Plan, Task } from "../types.js";
@@ -34,7 +35,10 @@ function createServices(explicitProjectRoot?: string) {
   const state = new StateManager(projectRoot);
   const github = new GitHubManager(config.github);
   github.setCwd(projectRoot);
-  const engine = new LocalEngine(state.forgeDir);
+  const firstHost = Object.values(config.hosts)[0];
+  const engine = firstHost?.type === "ssh"
+    ? new RemoteEngine(state.forgeDir, firstHost)
+    : new LocalEngine(state.forgeDir);
   const notifier = new Notifier(config.notifications, config.telegram);
   const repoFullName = state.loadPlan()?.repo ?? github.getRepoFullName() ?? `${config.github.org}/unknown`;
   const scheduler = new Scheduler(state, engine, github, notifier, {

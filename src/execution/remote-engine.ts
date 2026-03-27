@@ -55,6 +55,7 @@ export class RemoteEngine implements ExecutionEngine {
       `--model ${opts.model}`,
       `--max-turns ${opts.maxTurns}`,
       "--output-format json",
+      "--permission-mode bypassPermissions",
       `-p "$(cat ${remotePromptPath})"`,
       `> ${remoteOutputPath} 2>&1`,
       `; echo $? > /tmp/forge-${agentId}-exit`,

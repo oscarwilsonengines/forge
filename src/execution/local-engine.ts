@@ -58,6 +58,7 @@ export class LocalEngine implements ExecutionEngine {
       "--model", opts.model,
       "--max-turns", String(opts.maxTurns),
       "--output-format", "json",
+      "--permission-mode", "bypassPermissions",
     ];
 
     // 7. Spawn claude as a detached background process
