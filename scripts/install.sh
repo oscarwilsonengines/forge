@@ -140,29 +140,21 @@ npm install --production=false 2>&1 | tail -3
 info "Building..."
 npm run build 2>&1
 
-# Link globally — try without sudo first, then with
-info "Linking forge command..."
-if npm link 2>/dev/null; then
-  ok "Linked successfully"
-else
-  warn "npm link failed — trying with sudo..."
-  if sudo npm link 2>/dev/null; then
-    ok "Linked with sudo"
-  else
-    warn "npm link failed. Adding to PATH manually..."
-    # Fallback: create a shell wrapper in ~/.local/bin
-    mkdir -p "$HOME/.local/bin"
-    cat > "$HOME/.local/bin/forge" << 'WRAPPER'
+# Create forge command — use a shell wrapper (works everywhere, no sudo needed)
+info "Installing forge command..."
+mkdir -p "$HOME/.local/bin"
+cat > "$HOME/.local/bin/forge" << WRAPPER
 #!/bin/bash
-exec node "$HOME/.forge-tool/dist/interfaces/cli.js" "$@"
+exec node "$INSTALL_DIR/dist/interfaces/cli.js" "\$@"
 WRAPPER
-    chmod +x "$HOME/.local/bin/forge"
-    ok "Created wrapper at ~/.local/bin/forge"
-    if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
-      warn "Add to your PATH: export PATH=\"\$HOME/.local/bin:\$PATH\""
-      warn "Add that line to ~/.bashrc to make it permanent"
-    fi
-  fi
+chmod +x "$HOME/.local/bin/forge"
+ok "Created forge at ~/.local/bin/forge"
+
+# Ensure ~/.local/bin is on PATH
+if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+  export PATH="$HOME/.local/bin:$PATH"
+  ok "Added ~/.local/bin to PATH (in .bashrc)"
 fi
 
 # ─── Verify ───────────────────────────────────────────────────────
