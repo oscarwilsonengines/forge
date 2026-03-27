@@ -1,0 +1,80 @@
+# forge.yaml — Forge orchestrator configuration
+
+github:
+  org: "ZbOscar"                             # GitHub org or user for new repos
+  default_visibility: "private"
+  labels:
+    - { name: "forge:todo",        color: "0e8a16", description: "Ready for an agent" }
+    - { name: "forge:in-progress", color: "fbca04", description: "Agent working on it" }
+    - { name: "forge:blocked",     color: "d93f0b", description: "Waiting on dependency" }
+    - { name: "forge:review",      color: "1d76db", description: "Code complete, needs review" }
+    - { name: "forge:done",        color: "6f42c1", description: "Merged and closed" }
+    - { name: "forge:critical",    color: "b60205", description: "Review found critical issue" }
+    - { name: "priority:p0",       color: "b60205", description: "Do first" }
+    - { name: "priority:p1",       color: "d93f0b", description: "Do soon" }
+    - { name: "priority:p2",       color: "fbca04", description: "Do eventually" }
+
+hosts:
+  local:
+    type: "local"
+    max_agents: 5
+  # remote:
+  #   type: "ssh"
+  #   host: "172.16.2.135"
+  #   user: "zach"
+  #   key: "~/.ssh/id_ed25519"
+  #   max_agents: 5
+  #   claude_path: "claude"
+
+agents:
+  model: "sonnet"
+  boss_model: "opus"
+  review_model: "sonnet"
+  max_turns: 25
+  stagger_seconds: 30
+  timeout_minutes: 30
+  allowed_tools:
+    - "Read"
+    - "Write"
+    - "Edit"
+    - "Glob"
+    - "Grep"
+    - "Bash(git:*)"
+    - "Bash(npm:*)"
+    - "Bash(npx:*)"
+    - "Bash(gh issue:*)"
+    - "Bash(gh pr:*)"
+
+review:
+  enabled: true
+  agents:
+    - "security"
+    - "quality"
+    - "waste"
+    - "tests"
+    - "performance"
+  confidence_threshold: 80
+
+notifications:
+  terminal_bell: true
+  desktop: true
+  slack_webhook: ""
+  discord_webhook: ""
+  notify_on:
+    - "agent_complete"
+    - "agent_failed"
+    - "review_ready"
+    - "all_done"
+
+telegram:
+  bot_token_env: "FORGE_TELEGRAM_TOKEN"
+  chat_id_env: "FORGE_TELEGRAM_CHAT"
+  notify_on:
+    - "agent_complete"
+    - "agent_failed"
+    - "review_ready"
+    - "all_done"
+
+state:
+  dir: ".forge"
+  heartbeat_interval: 60

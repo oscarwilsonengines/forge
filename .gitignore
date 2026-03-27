@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.forge/agents/
+.forge/outputs/
+.forge/prompts/
+.forge/worktrees/
+.forge/logs/
+.forge/checkpoints/
+.env
+.env.local
+*.pem
+*.key

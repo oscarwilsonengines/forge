@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '\\a'; notify-send 'Forge Agent' 'Task completed' 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cat .forge/PROJECT_STATE.md 2>/dev/null || echo 'No project state found. Run forge status.'"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const f=process.argv[1]||''; if(f.includes('../')||f.startsWith('/tmp')||f.includes('.forge/plan.json')){process.exit(2)}\" -- \"$FORGE_TOOL_INPUT_PATH\" 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}
