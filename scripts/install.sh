@@ -140,9 +140,30 @@ npm install --production=false 2>&1 | tail -3
 info "Building..."
 npm run build 2>&1
 
-# Link globally
+# Link globally — try without sudo first, then with
 info "Linking forge command..."
-npm link 2>&1 | tail -2
+if npm link 2>/dev/null; then
+  ok "Linked successfully"
+else
+  warn "npm link failed — trying with sudo..."
+  if sudo npm link 2>/dev/null; then
+    ok "Linked with sudo"
+  else
+    warn "npm link failed. Adding to PATH manually..."
+    # Fallback: create a shell wrapper in ~/.local/bin
+    mkdir -p "$HOME/.local/bin"
+    cat > "$HOME/.local/bin/forge" << 'WRAPPER'
+#!/bin/bash
+exec node "$HOME/.forge-tool/dist/interfaces/cli.js" "$@"
+WRAPPER
+    chmod +x "$HOME/.local/bin/forge"
+    ok "Created wrapper at ~/.local/bin/forge"
+    if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
+      warn "Add to your PATH: export PATH=\"\$HOME/.local/bin:\$PATH\""
+      warn "Add that line to ~/.bashrc to make it permanent"
+    fi
+  fi
+fi
 
 # ─── Verify ───────────────────────────────────────────────────────
 echo ""
