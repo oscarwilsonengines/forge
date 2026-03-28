@@ -469,10 +469,157 @@ bot.onText(/\/deploy(?:\s+(.+))?/, async (msg, match) => {
   }
 });
 
-// Handle unknown commands
-bot.on("message", (msg) => {
+// ─── Natural Language Chat Mode ──────────────────────────────────
+
+/**
+ * Build a system prompt that gives Claude context about what Forge can do,
+ * the current project state, and available actions. Claude interprets
+ * the user's natural language and either answers directly or suggests
+ * an action the bot can execute.
+ */
+function buildChatSystemPrompt(chatId: number): string {
+  const target = getActiveTarget(chatId);
+  let projectContext = `Active project: ${target.name} (${target.path})`;
+
+  try {
+    const { state } = createServices(chatId);
+    const plan = state.loadPlan();
+    if (plan) {
+      const done = plan.tasks.filter((t) => t.status === "done").length;
+      const total = plan.tasks.length;
+      projectContext += `\nPlan: ${plan.status} | ${done}/${total} tasks done`;
+      projectContext += `\nRepo: ${plan.repo}`;
+      projectContext += `\nDescription: ${plan.description}`;
+      if (plan.tasks.length > 0) {
+        projectContext += "\nTasks:";
+        for (const t of plan.tasks) {
+          projectContext += `\n  - ${t.id} [${t.status}] ${t.title}`;
+        }
+      }
+    } else {
+      projectContext += "\nNo plan loaded.";
+    }
+  } catch {
+    projectContext += "\nCould not load project state.";
+  }
+
+  const projects = discoverProjects();
+  const projectList = projects.map((p) => p.name).join(", ");
+
+  return [
+    "You are Forge, a multi-agent AI orchestrator that manages coding projects.",
+    "You're running as a Telegram bot. Be concise — Telegram has a 4096 char limit.",
+    "",
+    "Current state:",
+    projectContext,
+    "",
+    `Available projects: ${projectList}`,
+    "",
+    "You can help with:",
+    "- Answering questions about project status, tasks, and agents",
+    "- Explaining what Forge does and how it works",
+    "- Suggesting next steps (plan, approve, build, review, deploy)",
+    "- General coding/architecture questions",
+    "",
+    "If the user wants to execute an action, tell them the command to use:",
+    "  /plan <description> — Create a new plan",
+    "  /approve — Approve the current plan",
+    "  /build — Spawn agents",
+    "  /status — Check status",
+    "  /stop — Stop agents",
+    "  /review — Run code review",
+    "  /deploy ping|pull|copy|test|run — Deploy to Windows PC",
+    "  /target <name> — Switch project",
+    "",
+    "Keep responses short and helpful. Use markdown sparingly (Telegram supports *bold* and `code`).",
+  ].join("\n");
+}
+
+// Per-chat conversation history (last N messages for context)
+const chatHistory = new Map<number, Array<{ role: "user" | "assistant"; content: string }>>();
+const MAX_HISTORY = 10;
+
+function addToHistory(chatId: number, role: "user" | "assistant", content: string): void {
+  if (!chatHistory.has(chatId)) chatHistory.set(chatId, []);
+  const history = chatHistory.get(chatId)!;
+  history.push({ role, content });
+  if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY);
+}
+
+function getHistory(chatId: number): Array<{ role: "user" | "assistant"; content: string }> {
+  return chatHistory.get(chatId) ?? [];
+}
+
+/**
+ * Send a natural language message to Claude and return the response.
+ * Uses the Claude CLI with conversation history for context.
+ */
+function chatWithClaude(chatId: number, userMessage: string): string {
+  const systemPrompt = buildChatSystemPrompt(chatId);
+  const history = getHistory(chatId);
+
+  // Build conversation context
+  let conversationContext = "";
+  if (history.length > 0) {
+    conversationContext = "\nRecent conversation:\n";
+    for (const msg of history) {
+      const prefix = msg.role === "user" ? "User" : "Forge";
+      conversationContext += `${prefix}: ${msg.content}\n`;
+    }
+    conversationContext += "\n";
+  }
+
+  const fullPrompt = `${systemPrompt}\n${conversationContext}User: ${userMessage}\n\nRespond concisely:`;
+
+  const rawOutput = execSync(
+    `claude --model ${config.agents.model} --max-turns 1 --output-format json -p ${JSON.stringify(fullPrompt)}`,
+    { encoding: "utf-8", timeout: 60_000, cwd: process.cwd() },
+  );
+
+  try {
+    const parsed = JSON.parse(rawOutput);
+    return typeof parsed.result === "string" ? parsed.result : rawOutput.trim();
+  } catch {
+    return rawOutput.trim();
+  }
+}
+
+// Handle all non-command messages as natural language chat
+bot.on("message", async (msg) => {
   if (!isAuthorized(msg.chat.id)) return;
-  if (msg.text && msg.text.startsWith("/") && !msg.text.match(/^\/(start|help|status|approve|build|stop|review|checklist|agents|projects|target|deploy)/)) {
-    bot.sendMessage(msg.chat.id, "Unknown command. Use /help to see available commands.");
+  if (!msg.text) return;
+
+  // Skip commands — they're handled by onText handlers above
+  if (msg.text.startsWith("/")) {
+    // Unknown command
+    if (!msg.text.match(/^\/(start|help|status|approve|build|stop|review|checklist|agents|projects|target|deploy)/)) {
+      bot.sendMessage(msg.chat.id, "Unknown command. Use /help or just chat with me.");
+    }
+    return;
+  }
+
+  // Natural language chat
+  try {
+    addToHistory(msg.chat.id, "user", msg.text);
+
+    // Send "typing" indicator
+    await bot.sendChatAction(msg.chat.id, "typing");
+
+    const response = chatWithClaude(msg.chat.id, msg.text);
+    addToHistory(msg.chat.id, "assistant", response);
+
+    // Truncate for Telegram's 4096 limit
+    const text = response.length > 4000 ? response.slice(0, 4000) + "\n..." : response;
+    await bot.sendMessage(msg.chat.id, text, { parse_mode: "Markdown" }).catch(() => {
+      // Markdown parse error — retry without formatting
+      bot.sendMessage(msg.chat.id, text);
+    });
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    if (errMsg.includes("timeout")) {
+      await bot.sendMessage(msg.chat.id, "Response took too long. Try a simpler question or use a slash command.");
+    } else {
+      await bot.sendMessage(msg.chat.id, `Chat error: ${errMsg.slice(0, 500)}`);
+    }
   }
 });
