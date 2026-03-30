@@ -150,8 +150,11 @@ bot.onText(/\/start/, (msg) => {
     "/agents — List running agents\n" +
     "/projects — List available projects\n" +
     "/target <name> — Switch active project\n" +
+    "/clone <owner/repo> — Clone a repo to the server\n" +
+    "/pull — Git pull the active project\n" +
     "/deploy — Deploy to Windows PC / mapped drives\n" +
-    "/help — This message",
+    "/help — This message\n\n" +
+    "Or just chat with me in plain English!",
     { parse_mode: "Markdown" },
   );
 });
@@ -170,6 +173,8 @@ bot.onText(/\/help/, (msg) => {
     "/agents — Running agents\n" +
     "/projects — List projects\n" +
     "/target <name> — Switch project\n" +
+    "/clone <owner/repo> — Clone repo\n" +
+    "/pull — Pull active project\n" +
     "/deploy — Deploy to Windows PC",
     { parse_mode: "Markdown" },
   );
@@ -227,6 +232,55 @@ bot.onText(/\/target(?:\s+(.+))?/, (msg, match) => {
     `Switched to \`${found.name}\` (${found.path})`,
     { parse_mode: "Markdown" },
   );
+});
+
+bot.onText(/\/clone(?:\s+(.+))?/, async (msg, match) => {
+  if (!isAuthorized(msg.chat.id)) return;
+  const repoArg = match?.[1]?.trim();
+
+  if (!repoArg) {
+    await bot.sendMessage(msg.chat.id,
+      "Usage: `/clone owner/repo`\n\nExample: `/clone ZbOscar/my-project`",
+      { parse_mode: "Markdown" },
+    );
+    return;
+  }
+
+  try {
+    const projectsDir = process.env.FORGE_PROJECTS_DIR ?? join(process.env.HOME ?? "/home/zbonham", "projects");
+    const repoName = repoArg.includes("/") ? repoArg.split("/").pop()! : repoArg;
+    const clonePath = join(projectsDir, repoName);
+
+    if (existsSync(clonePath)) {
+      // Already exists — just pull
+      await bot.sendMessage(msg.chat.id, `\`${repoName}\` already exists. Pulling latest...`, { parse_mode: "Markdown" });
+      const result = execSync(`cd "${clonePath}" && git pull`, { encoding: "utf-8", timeout: 60_000 }).trim();
+      await bot.sendMessage(msg.chat.id, `Updated:\n\`\`\`\n${result}\n\`\`\``, { parse_mode: "Markdown" });
+    } else {
+      // Clone it
+      await bot.sendMessage(msg.chat.id, `Cloning \`${repoArg}\` to \`${clonePath}\`...`, { parse_mode: "Markdown" });
+      const cloneUrl = repoArg.includes("://") || repoArg.includes("@")
+        ? repoArg
+        : `git@github.com:${repoArg}.git`;
+      const result = execSync(`git clone "${cloneUrl}" "${clonePath}"`, { encoding: "utf-8", timeout: 120_000 }).trim();
+      await bot.sendMessage(msg.chat.id, `Cloned \`${repoName}\`. Use \`/target ${repoName}\` to switch to it.`, { parse_mode: "Markdown" });
+    }
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    await bot.sendMessage(msg.chat.id, `Clone failed: ${errMsg.slice(0, 1000)}`);
+  }
+});
+
+bot.onText(/\/pull/, async (msg) => {
+  if (!isAuthorized(msg.chat.id)) return;
+  try {
+    const target = getActiveTarget(msg.chat.id);
+    await bot.sendMessage(msg.chat.id, `Pulling latest for \`${target.name}\`...`, { parse_mode: "Markdown" });
+    const result = execSync(`cd "${target.path}" && git pull`, { encoding: "utf-8", timeout: 60_000 }).trim();
+    await bot.sendMessage(msg.chat.id, `\`\`\`\n${result}\n\`\`\``, { parse_mode: "Markdown" });
+  } catch (e) {
+    await bot.sendMessage(msg.chat.id, `Pull failed: ${e}`);
+  }
 });
 
 // ─── Forge Operation Commands ────────────────────────────────────
@@ -592,7 +646,7 @@ bot.on("message", async (msg) => {
   // Skip commands — they're handled by onText handlers above
   if (msg.text.startsWith("/")) {
     // Unknown command
-    if (!msg.text.match(/^\/(start|help|status|approve|build|stop|review|checklist|agents|projects|target|deploy)/)) {
+    if (!msg.text.match(/^\/(start|help|status|approve|build|stop|review|checklist|agents|projects|target|clone|pull|deploy)/)) {
       bot.sendMessage(msg.chat.id, "Unknown command. Use /help or just chat with me.");
     }
     return;
