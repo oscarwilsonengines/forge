@@ -10,3 +10,4 @@ dist/
 .env.local
 *.pem
 *.key
+test-forge-project/

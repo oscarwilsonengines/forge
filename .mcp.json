@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "forge": {
+      "command": "node",
+      "args": ["C:\\Users\\zbonham\\forge\\dist\\interfaces\\mcp-server.js"],
+      "env": {
+        "FORGE_PROJECT_ROOT": "C:\\Users\\zbonham\\forge"
+      }
+    }
+  }
+}

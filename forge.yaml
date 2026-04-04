@@ -16,11 +16,17 @@ github:
 
 hosts:
   server:
-    type: "ssh"
-    host: "192.168.12.111"
-    user: "zbonham"
+    type: "http"
+    url: "https://forge.bozits.com"
+    api_token_env: "FORGE_API_TOKEN"
     max_agents: 10
-    claude_path: "/usr/local/bin/claude"
+  # Fallback SSH (when on LAN)
+  # server-ssh:
+  #   type: "ssh"
+  #   host: "192.168.12.111"
+  #   user: "zbonham"
+  #   max_agents: 10
+  #   claude_path: "/usr/local/bin/claude"
 
 agents:
   model: "sonnet"
