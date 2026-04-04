@@ -40,7 +40,8 @@ RUN mkdir -p /repos /app/.forge/agents /app/.forge/outputs /app/.forge/prompts /
 USER forge
 RUN git config --global user.name "Forge Worker" \
     && git config --global user.email "forge@bozits.com" \
-    && git config --global init.defaultBranch main
+    && git config --global init.defaultBranch main \
+    && git config --global --add safe.directory '*'
 
 EXPOSE 8787
 
