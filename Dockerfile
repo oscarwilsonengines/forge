@@ -29,10 +29,15 @@ RUN npm install --omit=dev
 COPY dist/ ./dist/
 COPY forge.yaml ./
 
-# Create directories for state and repos
-RUN mkdir -p /repos /app/.forge/agents /app/.forge/outputs /app/.forge/prompts /app/.forge/worktrees
+# Create non-root user for running Claude (refuses root + bypassPermissions)
+RUN useradd -m -s /bin/bash forge
 
-# Git config for worktree operations
+# Create directories with forge user ownership
+RUN mkdir -p /repos /app/.forge/agents /app/.forge/outputs /app/.forge/prompts /app/.forge/worktrees \
+    && chown -R forge:forge /repos /app/.forge /app
+
+# Git config for worktree operations (as forge user)
+USER forge
 RUN git config --global user.name "Forge Worker" \
     && git config --global user.email "forge@bozits.com" \
     && git config --global init.defaultBranch main

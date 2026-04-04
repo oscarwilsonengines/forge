@@ -12,7 +12,7 @@ services:
     volumes:
       - forge-repos:/repos
       - forge-state:/app/.forge
-      - ${HOME}/.claude:/root/.claude:ro
+      - ${HOME}/.claude:/home/forge/.claude:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8787/health"]
@@ -32,7 +32,7 @@ services:
     volumes:
       - forge-repos:/repos
       - forge-state:/app/.forge
-      - ${HOME}/.claude:/root/.claude:ro
+      - ${HOME}/.claude:/home/forge/.claude:ro
     restart: unless-stopped
     depends_on:
       forge-worker:

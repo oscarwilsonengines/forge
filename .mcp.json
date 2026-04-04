@@ -4,7 +4,8 @@
       "command": "node",
       "args": ["C:\\Users\\zbonham\\forge\\dist\\interfaces\\mcp-server.js"],
       "env": {
-        "FORGE_PROJECT_ROOT": "C:\\Users\\zbonham\\forge"
+        "FORGE_PROJECT_ROOT": "C:\\Users\\zbonham\\forge",
+        "FORGE_API_TOKEN": "f3847288efe18f419c9e2a2473a22d4d33bd1e34793f9640"
       }
     }
   }
