@@ -8,6 +8,9 @@ import { Scheduler } from "../core/scheduler.js";
 import { Notifier } from "../core/notifier.js";
 import { execSync } from "node:child_process";
 import { LocalEngine } from "../execution/local-engine.js";
+import { RemoteEngine } from "../execution/remote-engine.js";
+import { HttpEngine } from "../execution/http-engine.js";
+import type { ExecutionEngine } from "../execution/engine.js";
 import { GitHubManager } from "../github/manager.js";
 import { ReviewPipeline } from "../review/pipeline.js";
 import { log } from "../utils/logger.js";
@@ -111,7 +114,13 @@ function createServices(chatId: number) {
   const forgeDir = join(projectRoot, config.state.dir);
 
   const state = new StateManager(projectRoot);
-  const engine = new LocalEngine(forgeDir);
+  // Pick engine based on host config (same logic as CLI/MCP)
+  const firstHost = Object.values(config.hosts)[0];
+  const engine: ExecutionEngine = firstHost?.type === "http"
+    ? new HttpEngine(firstHost.url!, process.env[firstHost.api_token_env || ""] || "", forgeDir)
+    : firstHost?.type === "ssh"
+      ? new RemoteEngine(forgeDir, firstHost)
+      : new LocalEngine(forgeDir);
   const github = new GitHubManager(config.github);
   github.setCwd(projectRoot);
   const notifier = new Notifier(config.notifications, config.telegram);
@@ -488,8 +497,7 @@ bot.onText(/\/agents/, async (msg) => {
  * The tunnel runs on port 2222 on localhost (from the server's perspective).
  */
 function execOnPC(command: string, timeoutMs = 120_000): string {
-  const deployConfig = (config as Record<string, unknown>).deploy as Record<string, { ssh_host: string; ssh_port: number; ssh_user: string }> | undefined;
-  const pc = deployConfig?.pc;
+  const pc = config.deploy?.pc;
   const host = pc?.ssh_host ?? "localhost";
   const port = pc?.ssh_port ?? 2222;
   const user = pc?.ssh_user ?? "zbonham";
@@ -539,8 +547,7 @@ bot.onText(/\/deploy(?:\s+(.+))?/, async (msg, match) => {
     if (pullMatch) {
       const repo = pullMatch[1];
       await bot.sendMessage(msg.chat.id, `Pulling \`${repo}\` on Windows PC...`, { parse_mode: "Markdown" });
-      const deployConfig = (config as Record<string, unknown>).deploy as Record<string, { projects_dir?: string }> | undefined;
-      const projectsDir = deployConfig?.pc?.projects_dir ?? "C:\\\\Users\\\\zbonham\\\\source\\\\repos";
+      const projectsDir = config.deploy?.pc?.projects_dir ?? "C:\\\\Users\\\\zbonham\\\\source\\\\repos";
       const result = execOnPC(`cd "${projectsDir}\\\\${repo}" && git pull`, 60_000);
       await bot.sendMessage(msg.chat.id, `Pull complete:\n\`\`\`\n${result}\n\`\`\``, { parse_mode: "Markdown" });
       return;
@@ -552,8 +559,7 @@ bot.onText(/\/deploy(?:\s+(.+))?/, async (msg, match) => {
       const srcRepo = copyMatch[1];
       const destPath = copyMatch[2];
       await bot.sendMessage(msg.chat.id, `Copying \`${srcRepo}\` to \`${destPath}\`...`, { parse_mode: "Markdown" });
-      const deployConfig = (config as Record<string, unknown>).deploy as Record<string, { projects_dir?: string }> | undefined;
-      const projectsDir = deployConfig?.pc?.projects_dir ?? "C:\\\\Users\\\\zbonham\\\\source\\\\repos";
+      const projectsDir = config.deploy?.pc?.projects_dir ?? "C:\\\\Users\\\\zbonham\\\\source\\\\repos";
       const result = execOnPC(
         `robocopy "${projectsDir}\\\\${srcRepo}" "${destPath}" /MIR /XD .git node_modules /NFL /NDL /NJH /NJS`,
         300_000,
@@ -567,8 +573,7 @@ bot.onText(/\/deploy(?:\s+(.+))?/, async (msg, match) => {
     if (testMatch) {
       const repo = testMatch[1];
       await bot.sendMessage(msg.chat.id, `Running tests for \`${repo}\` on Windows PC...`, { parse_mode: "Markdown" });
-      const deployConfig = (config as Record<string, unknown>).deploy as Record<string, { projects_dir?: string }> | undefined;
-      const projectsDir = deployConfig?.pc?.projects_dir ?? "C:\\\\Users\\\\zbonham\\\\source\\\\repos";
+      const projectsDir = config.deploy?.pc?.projects_dir ?? "C:\\\\Users\\\\zbonham\\\\source\\\\repos";
       const result = execOnPC(`cd "${projectsDir}\\\\${repo}" && npm test 2>&1`, 300_000);
       const text = result.length > 3900 ? result.slice(0, 3900) + "\n..." : result;
       await bot.sendMessage(msg.chat.id, `Test results:\n\`\`\`\n${text}\n\`\`\``, { parse_mode: "Markdown" });

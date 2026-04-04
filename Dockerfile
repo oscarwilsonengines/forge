@@ -25,8 +25,9 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev
 
-# Copy compiled dist
+# Copy compiled dist and config
 COPY dist/ ./dist/
+COPY forge.yaml ./
 
 # Create directories for state and repos
 RUN mkdir -p /repos /app/.forge/agents /app/.forge/outputs /app/.forge/prompts /app/.forge/worktrees

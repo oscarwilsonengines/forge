@@ -20,6 +20,25 @@ services:
       timeout: 10s
       retries: 3
 
+  forge-telegram:
+    build: .
+    container_name: forge-telegram
+    network_mode: host
+    environment:
+      - FORGE_TELEGRAM_TOKEN=${FORGE_TELEGRAM_TOKEN}
+      - FORGE_TELEGRAM_CHAT=${FORGE_TELEGRAM_CHAT}
+      - GH_TOKEN=${GH_TOKEN}
+      - FORGE_API_TOKEN=${FORGE_API_TOKEN}
+    volumes:
+      - forge-repos:/repos
+      - forge-state:/app/.forge
+      - ${HOME}/.claude:/root/.claude:ro
+    restart: unless-stopped
+    depends_on:
+      forge-worker:
+        condition: service_healthy
+    command: ["node", "dist/interfaces/telegram-bot.js"]
+
 volumes:
   forge-repos:
   forge-state:

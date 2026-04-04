@@ -12,6 +12,7 @@ import { Scheduler } from "../core/scheduler.js";
 import { Notifier } from "../core/notifier.js";
 import { LocalEngine } from "../execution/local-engine.js";
 import { RemoteEngine } from "../execution/remote-engine.js";
+import { HttpEngine } from "../execution/http-engine.js";
 import type { ExecutionEngine } from "../execution/engine.js";
 import { GitHubManager } from "../github/manager.js";
 import { ReviewPipeline } from "../review/pipeline.js";
@@ -44,11 +45,13 @@ function createServices(config: ForgeConfig, projectRoot?: string): ForgeService
   const state = new StateManager(root);
   const github = new GitHubManager(config.github);
   github.setCwd(root);
-  // Pick engine based on host config — use remote if the first host is SSH
+  // Pick engine based on host config
   const firstHost = Object.values(config.hosts)[0];
-  const engine: ExecutionEngine = firstHost?.type === "ssh"
-    ? new RemoteEngine(state.forgeDir, firstHost)
-    : new LocalEngine(state.forgeDir);
+  const engine: ExecutionEngine = firstHost?.type === "http"
+    ? new HttpEngine(firstHost.url!, process.env[firstHost.api_token_env || ""] || "", state.forgeDir)
+    : firstHost?.type === "ssh"
+      ? new RemoteEngine(state.forgeDir, firstHost)
+      : new LocalEngine(state.forgeDir);
   const notifier = new Notifier(config.notifications, config.telegram);
   const repoFullName = state.loadPlan()?.repo ?? github.getRepoFullName() ?? `${config.github.org}/unknown`;
   const scheduler = new Scheduler(state, engine, github, notifier, {
@@ -133,7 +136,7 @@ function buildTasksFromRaw(rawTasks: RawTaskData[], github: GitHubManager, repo:
 function buildAgentHandle(agent: import("../types.js").Agent) {
   return {
     id: agent.id,
-    engineType: (agent.host === "local" ? "local" : "ssh") as "local" | "ssh",
+    engineType: agent.engine_type ?? "local" as "local" | "ssh" | "http",
     pid: agent.pid, host: agent.host,
     worktreePath: agent.worktree_path,
     outputPath: agent.output_path,

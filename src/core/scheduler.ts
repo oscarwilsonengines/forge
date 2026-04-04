@@ -92,6 +92,7 @@ export class Scheduler {
           task_id: task.id,
           pid: handle.pid,
           host: handle.host,
+          engine_type: handle.engineType,
           model: this.config.model,
           started_at: handle.startedAt,
           last_heartbeat: handle.startedAt,
@@ -165,7 +166,7 @@ export class Scheduler {
     for (const agent of agents) {
       const handle: WorkerHandle = {
         id: agent.id,
-        engineType: agent.host === "local" ? "local" : "ssh",
+        engineType: agent.engine_type ?? "local",
         pid: agent.pid,
         host: agent.host,
         worktreePath: agent.worktree_path,
@@ -299,7 +300,7 @@ export class Scheduler {
     for (const agent of agents) {
       const handle: WorkerHandle = {
         id: agent.id,
-        engineType: agent.host === "local" ? "local" : "ssh",
+        engineType: agent.engine_type ?? "local",
         pid: agent.pid,
         host: agent.host,
         worktreePath: agent.worktree_path,

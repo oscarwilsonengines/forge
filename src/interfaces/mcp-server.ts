@@ -11,6 +11,7 @@ import { Scheduler } from "../core/scheduler.js";
 import { Notifier } from "../core/notifier.js";
 import { LocalEngine } from "../execution/local-engine.js";
 import { RemoteEngine } from "../execution/remote-engine.js";
+import { HttpEngine } from "../execution/http-engine.js";
 import { GitHubManager } from "../github/manager.js";
 import { ReviewPipeline } from "../review/pipeline.js";
 import type { ForgeConfig, Plan, Task } from "../types.js";
@@ -36,9 +37,11 @@ function createServices(explicitProjectRoot?: string) {
   const github = new GitHubManager(config.github);
   github.setCwd(projectRoot);
   const firstHost = Object.values(config.hosts)[0];
-  const engine = firstHost?.type === "ssh"
-    ? new RemoteEngine(state.forgeDir, firstHost)
-    : new LocalEngine(state.forgeDir);
+  const engine = firstHost?.type === "http"
+    ? new HttpEngine(firstHost.url!, process.env[firstHost.api_token_env || ""] || "", state.forgeDir)
+    : firstHost?.type === "ssh"
+      ? new RemoteEngine(state.forgeDir, firstHost)
+      : new LocalEngine(state.forgeDir);
   const notifier = new Notifier(config.notifications, config.telegram);
   const repoFullName = state.loadPlan()?.repo ?? github.getRepoFullName() ?? `${config.github.org}/unknown`;
   const scheduler = new Scheduler(state, engine, github, notifier, {
@@ -254,7 +257,7 @@ async function handleRestart(agentId: string): Promise<string> {
   const agent = state.loadAgent(agentId);
   if (!agent) return `Error: Agent ${agentId} not found.`;
   await engine.kill({
-    id: agent.id, engineType: agent.host === "local" ? "local" : "ssh",
+    id: agent.id, engineType: agent.engine_type ?? "local",
     pid: agent.pid, host: agent.host, worktreePath: agent.worktree_path,
     outputPath: agent.output_path, startedAt: agent.started_at,
   });

@@ -59,11 +59,15 @@ export const AgentStatus = z.enum([
 ]);
 export type AgentStatus = z.infer<typeof AgentStatus>;
 
+export const EngineType = z.enum(["local", "ssh", "http"]);
+export type EngineType = z.infer<typeof EngineType>;
+
 export const AgentSchema = z.object({
   id: z.string(),
   task_id: z.string(),
   pid: z.number().optional(),
   host: z.string(),
+  engine_type: EngineType.default("local"),
   model: z.string(),
   started_at: z.string(),
   finished_at: z.string().optional(),
@@ -107,10 +111,12 @@ export type Finding = z.infer<typeof FindingSchema>;
 // ─── Configuration ───────────────────────────────────────────────
 
 export const HostConfigSchema = z.object({
-  type: z.enum(["local", "ssh"]),
+  type: z.enum(["local", "ssh", "http"]),
   host: z.string().optional(),
   user: z.string().optional(),
   key: z.string().optional(),
+  url: z.string().optional(),
+  api_token_env: z.string().optional(),
   max_agents: z.number().default(5),
   claude_path: z.string().default("claude"),
 });
@@ -155,6 +161,15 @@ export const ForgeConfigSchema = z.object({
     chat_id_env: z.string().default("FORGE_TELEGRAM_CHAT"),
     notify_on: z.array(z.string()).default([]),
   }).optional(),
+  deploy: z.object({
+    pc: z.object({
+      ssh_host: z.string().default("localhost"),
+      ssh_port: z.number().default(2222),
+      ssh_user: z.string().default("zbonham"),
+      drives: z.record(z.string(), z.string()).default({}),
+      projects_dir: z.string().default("C:\\Users\\zbonham\\source\\repos"),
+    }).optional(),
+  }).optional(),
   state: z.object({
     dir: z.string().default(".forge"),
     heartbeat_interval: z.number().default(60),
@@ -166,7 +181,7 @@ export type ForgeConfig = z.infer<typeof ForgeConfigSchema>;
 
 export interface WorkerHandle {
   id: string;
-  engineType: "local" | "ssh";
+  engineType: "local" | "ssh" | "http";
   pid?: number;
   host: string;
   worktreePath: string;
