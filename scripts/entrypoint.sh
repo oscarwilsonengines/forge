@@ -18,6 +18,10 @@ fi
 chmod a+r /home/forge/.claude/.credentials.json 2>/dev/null || true
 chmod a+r /home/forge/.claude.json 2>/dev/null || true
 
+# Ensure Claude session directories exist and are writable
+mkdir -p /home/forge/.claude/session-env /home/forge/.claude/cache /home/forge/.claude/debug /home/forge/.claude/statsig
+chown -R forge:forge /home/forge/.claude/session-env /home/forge/.claude/cache /home/forge/.claude/debug /home/forge/.claude/statsig 2>/dev/null || true
+
 # Set up GitHub auth for git push and gh CLI
 if [ -n "$GH_TOKEN" ]; then
   # gh CLI uses GH_TOKEN env var automatically
