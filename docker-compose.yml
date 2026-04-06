@@ -12,7 +12,7 @@ services:
     volumes:
       - forge-repos:/repos
       - forge-state:/app/.forge
-      - ${HOME}/.claude:/home/forge/.claude:ro
+      - ${HOME}/.claude:/home/forge/.claude
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8787/health"]
@@ -25,6 +25,7 @@ services:
     container_name: forge-telegram
     network_mode: host
     environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - FORGE_TELEGRAM_TOKEN=${FORGE_TELEGRAM_TOKEN}
       - FORGE_TELEGRAM_CHAT=${FORGE_TELEGRAM_CHAT}
       - GH_TOKEN=${GH_TOKEN}
@@ -32,7 +33,7 @@ services:
     volumes:
       - forge-repos:/repos
       - forge-state:/app/.forge
-      - ${HOME}/.claude:/home/forge/.claude:ro
+      - ${HOME}/.claude:/home/forge/.claude
     restart: unless-stopped
     depends_on:
       forge-worker:
