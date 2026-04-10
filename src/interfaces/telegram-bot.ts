@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import "dotenv/config";
 import TelegramBot from "node-telegram-bot-api";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, basename } from "node:path";
 import { loadConfig } from "../config.js";
 import { StateManager } from "../core/state-manager.js";
@@ -15,6 +15,25 @@ import type { ExecutionEngine } from "../execution/engine.js";
 import { GitHubManager } from "../github/manager.js";
 import { ReviewPipeline } from "../review/pipeline.js";
 import { log } from "../utils/logger.js";
+import type { Task, Plan } from "../types.js";
+
+function buildPlanPrompt(description: string): string {
+  return [
+    "You are a project planner. Break this project description into discrete implementation tasks.",
+    "", `Project: ${description}`, "",
+    "Output ONLY a JSON object with this exact structure (no other text):",
+    '{ "tasks": [{ "id": "task-1", "title": "Short task title", "description": "Detailed description",',
+    '  "acceptance_criteria": ["Criterion 1", "Criterion 2"], "depends_on": [], "priority": "p0",',
+    '  "estimated_minutes": 15 }] }', "",
+    "Rules:",
+    "- Each task completable by one agent in 10-30 minutes",
+    "- Use depends_on to reference other task IDs",
+    "- Priority: p0=core/blocking, p1=important, p2=nice-to-have",
+    "- Keep tasks focused: one module, one feature, one concern",
+    "- Include test task per implementation task",
+    "- Maximum 15 tasks",
+  ].join("\n");
+}
 
 // ─── Configuration ───────────────────────────────────────────────
 
@@ -175,6 +194,8 @@ bot.onText(/\/help/, (msg) => {
   const target = getActiveTarget(msg.chat.id);
   bot.sendMessage(msg.chat.id,
     `Active: \`${target.name}\`\n\n` +
+    "Or just chat with me — I understand natural language.\n\n" +
+    "/plan <desc> — Create a plan\n" +
     "/status — Current status\n" +
     "/approve — Approve plan\n" +
     "/build — Spawn agents\n" +
@@ -398,6 +419,87 @@ bot.onText(/\/approve/, async (msg) => {
     await bot.sendMessage(msg.chat.id, `Plan approved (${plan.tasks.length} tasks). Run /build to start.`);
   } catch (e) {
     await bot.sendMessage(msg.chat.id, `Error: ${e}`);
+  }
+});
+
+bot.onText(/\/plan(?:\s+(.+))?/, async (msg, match) => {
+  if (!isAuthorized(msg.chat.id)) return;
+  const description = match?.[1]?.trim();
+
+  if (!description) {
+    await bot.sendMessage(msg.chat.id,
+      "What should I plan? Example:\n`/plan Create v3 mobile UI with safe-area support`",
+      { parse_mode: "Markdown" });
+    return;
+  }
+
+  const active = getActiveTarget(msg.chat.id);
+  await bot.sendChatAction(msg.chat.id, "typing");
+  await bot.sendMessage(msg.chat.id, `Planning \`${active.name}\`: ${description.slice(0, 100)}...`, { parse_mode: "Markdown" });
+
+  try {
+    const state = new StateManager(active.path);
+    const github = new GitHubManager(config.github);
+    github.setCwd(active.path);
+    const repoFullName = github.getRepoFullName() ?? `${config.github.org}/${active.name}`;
+
+    const isRoot = process.getuid?.() === 0;
+    const result = spawnSync("claude", [
+      "--model", config.agents.boss_model,
+      "--max-turns", "5",
+      "--output-format", "json",
+      "--permission-mode", "bypassPermissions",
+      "-p", "-",
+    ], {
+      input: buildPlanPrompt(description),
+      encoding: "utf-8",
+      timeout: 300_000,
+      cwd: active.path,
+      ...(isRoot ? { uid: 1001, gid: 1001 } : {}),
+    });
+
+    if (result.error) throw result.error;
+    let content = result.stdout;
+    if (!content) throw new Error(result.stderr || `claude exited with code ${result.status}`);
+    try {
+      const envelope = JSON.parse(content) as { result?: string };
+      if (typeof envelope.result === "string") content = envelope.result;
+    } catch { /* raw text */ }
+    content = content.replace(/```json\s*/g, "").replace(/```\s*/g, "");
+    const jsonMatch = content.match(/\{[\s\S]*"tasks"[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("Could not parse tasks from Claude output");
+
+    const tasksData = JSON.parse(jsonMatch[0]) as {
+      tasks: Array<{ id: string; title: string; description: string; acceptance_criteria: string[]; depends_on: string[]; priority: "p0" | "p1" | "p2"; estimated_minutes: number }>;
+    };
+
+    const tasks: Task[] = [];
+    for (const raw of tasksData.tasks) {
+      const task: Task = {
+        id: raw.id, title: raw.title, description: raw.description,
+        acceptance_criteria: raw.acceptance_criteria, depends_on: raw.depends_on,
+        conflicts_with: [], priority: raw.priority,
+        complexity: "integration", steps: [], retry_count: 0,
+        estimated_minutes: raw.estimated_minutes, status: "todo",
+      };
+      try { task.issue_number = github.createIssue(repoFullName, task); } catch { /* non-critical */ }
+      tasks.push(task);
+    }
+
+    const plan: Plan = {
+      project: active.name, projectRoot: active.path, repo: repoFullName,
+      description, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      status: "draft", tasks, review_findings: [],
+    };
+    state.savePlan(plan);
+    state.generateProjectState();
+
+    const summary = tasks.map(t => `${t.id} [${t.priority}] ${t.title}`).join("\n");
+    await bot.sendMessage(msg.chat.id,
+      `Plan created (${tasks.length} tasks):\n\`\`\`\n${summary}\n\`\`\`\n\n/approve when ready.`,
+      { parse_mode: "Markdown" });
+  } catch (e) {
+    await bot.sendMessage(msg.chat.id, `Plan failed: ${(e as Error).message?.slice(0, 500)}`);
   }
 });
 
@@ -639,31 +741,31 @@ function buildChatSystemPrompt(chatId: number): string {
   const projectList = projects.map((p) => p.name).join(", ");
 
   return [
-    "You are Forge, a multi-agent AI orchestrator that manages coding projects.",
-    "You're running as a Telegram bot. Be concise — Telegram has a 4096 char limit.",
+    "You are Forge, a coding assistant on Telegram. The user is on their phone — be concise (4096 char limit).",
     "",
     "Current state:",
     projectContext,
     "",
     `Available projects: ${projectList}`,
     "",
-    "You can help with:",
-    "- Answering questions about project status, tasks, and agents",
-    "- Explaining what Forge does and how it works",
-    "- Suggesting next steps (plan, approve, build, review, deploy)",
-    "- General coding/architecture questions",
+    "How to help:",
+    "- Talk naturally. Discuss ideas, architecture, approaches.",
+    "- When the user wants to start building, help them refine the idea first.",
+    "- When they're ready to plan, suggest: /plan <one-line description>",
+    "- You can explore project files to answer questions about code.",
+    "- Be conversational, not robotic. Don't list commands unless asked.",
     "",
-    "If the user wants to execute an action, tell them the command to use:",
-    "  /plan <description> — Create a new plan",
-    "  /approve — Approve the current plan",
-    "  /build — Spawn agents",
-    "  /status — Check status",
+    "Commands the user can use (only mention these if relevant):",
+    "  /plan <desc> — Decompose work into tasks",
+    "  /approve — Approve a plan",
+    "  /build — Spawn worker agents",
+    "  /status — Check progress",
     "  /stop — Stop agents",
     "  /review — Run code review",
-    "  /deploy ping|pull|copy|test|run — Deploy to Windows PC",
     "  /target <name> — Switch project",
+    "  /projects — List all projects",
     "",
-    "Keep responses short and helpful. Use markdown sparingly (Telegram supports *bold* and `code`).",
+    "Keep it short. Use *bold* and `code` sparingly.",
   ].join("\n");
 }
 
@@ -739,13 +841,13 @@ bot.on("message", async (msg) => {
   if (!isAuthorized(msg.chat.id)) return;
   if (!msg.text) return;
 
-  // Skip commands — they're handled by onText handlers above
+  // Skip known commands — they're handled by onText handlers above
   if (msg.text.startsWith("/")) {
-    // Unknown command
-    if (!msg.text.match(/^\/(start|help|status|approve|build|stop|review|checklist|agents|projects|target|clone|clone-all|pull|deploy)/)) {
-      bot.sendMessage(msg.chat.id, "Unknown command. Use /help or just chat with me.");
+    if (msg.text.match(/^\/(start|help|status|approve|build|stop|review|checklist|agents|projects|target|clone|clone-all|pull|deploy|plan)\b/)) {
+      return; // Known command, already handled
     }
-    return;
+    // Unknown /command — strip slash and fall through to chat mode
+    msg.text = msg.text.replace(/^\/\S*\s*/, "").trim() || msg.text.slice(1);
   }
 
   // Natural language chat
