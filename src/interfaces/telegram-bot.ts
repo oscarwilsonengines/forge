@@ -446,20 +446,22 @@ bot.onText(/\/plan(?:\s+(.+))?/, async (msg, match) => {
     const isRoot = process.getuid?.() === 0;
     const result = spawnSync("claude", [
       "--model", config.agents.boss_model,
-      "--max-turns", "1",
+      "--max-turns", "3",
       "--output-format", "json",
+      "--permission-mode", "bypassPermissions",
       "-p", "-",
     ], {
       input: buildPlanPrompt(description),
       encoding: "utf-8",
       timeout: 300_000,
-      cwd: "/tmp",
+      cwd: active.path,
       ...(isRoot ? { uid: 1001, gid: 1001 } : {}),
     });
 
     if (result.error) throw result.error;
+    if (result.stderr) log.warn(`plan stderr: ${result.stderr.slice(0, 500)}`);
     let content = result.stdout;
-    if (!content) throw new Error(result.stderr || `claude exited with code ${result.status}`);
+    if (!content) throw new Error(result.stderr || `claude exited with code ${result.status} (signal: ${result.signal})`);
     try {
       const envelope = JSON.parse(content) as { result?: string };
       if (typeof envelope.result === "string") content = envelope.result;

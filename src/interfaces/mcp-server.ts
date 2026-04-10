@@ -298,6 +298,7 @@ async function handleDesign(description: string, targetRoot?: string): Promise<s
   const result = spawnSync("claude", [
     "--model", config.agents.boss_model,
     "--max-turns", "5",
+    "--permission-mode", "bypassPermissions",
     "-p", "-",
   ], {
     input: designPrompt,
@@ -307,7 +308,7 @@ async function handleDesign(description: string, targetRoot?: string): Promise<s
   });
   if (result.error) throw result.error;
   const rawOutput = result.stdout;
-  if (!rawOutput) throw new Error(result.stderr || `claude exited with code ${result.status}`);
+  if (!rawOutput) throw new Error(result.stderr || `claude exited with code ${result.status} (signal: ${result.signal})`);
 
   let content = rawOutput;
   try {
@@ -341,6 +342,7 @@ async function handlePlan(description: string, targetRoot?: string): Promise<str
   const result = spawnSync("claude", [
     "--model", config.agents.boss_model,
     "--max-turns", "5",
+    "--permission-mode", "bypassPermissions",
     "-p", "-",
   ], {
     input: planPrompt,
@@ -350,7 +352,7 @@ async function handlePlan(description: string, targetRoot?: string): Promise<str
   });
   if (result.error) throw result.error;
   const rawOutput = result.stdout;
-  if (!rawOutput) throw new Error(result.stderr || `claude exited with code ${result.status}`);
+  if (!rawOutput) throw new Error(result.stderr || `claude exited with code ${result.status} (signal: ${result.signal})`);
 
   let content = rawOutput;
   try {

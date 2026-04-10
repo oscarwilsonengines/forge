@@ -228,6 +228,7 @@ program.command("design").argument("<description>", "Description of feature to d
       const result = spawnSync("claude", [
         "--model", config.agents.boss_model,
         "--max-turns", "5",
+        "--permission-mode", "bypassPermissions",
         "-p", "-",
       ], {
         input: prompt,
@@ -338,6 +339,7 @@ program.command("plan").argument("<description>", "Description of work to plan")
       const result = spawnSync("claude", [
         "--model", config.agents.boss_model,
         "--max-turns", "5",
+        "--permission-mode", "bypassPermissions",
         "-p", "-",
       ], {
         input: planPrompt,
