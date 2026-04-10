@@ -126,6 +126,7 @@ function buildTasksFromRaw(rawTasks: RawTaskData[], github: GitHubManager, repo:
       id: raw.id, title: raw.title, description: raw.description,
       acceptance_criteria: raw.acceptance_criteria, depends_on: raw.depends_on,
       conflicts_with: [], priority: raw.priority,
+      complexity: "integration", steps: [], retry_count: 0,
       estimated_minutes: raw.estimated_minutes, status: "todo",
     };
     try { task.issue_number = github.createIssue(repo, task); }

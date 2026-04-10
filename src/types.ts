@@ -15,6 +15,17 @@ export type TaskStatus = z.infer<typeof TaskStatus>;
 export const TaskPriority = z.enum(["p0", "p1", "p2"]);
 export type TaskPriority = z.infer<typeof TaskPriority>;
 
+export const TaskComplexity = z.enum(["mechanical", "integration", "architecture"]);
+export type TaskComplexity = z.infer<typeof TaskComplexity>;
+
+export const TaskStepSchema = z.object({
+  action: z.string(),
+  code: z.string().optional(),
+  verify: z.string().optional(),
+  expected: z.string().optional(),
+});
+export type TaskStep = z.infer<typeof TaskStepSchema>;
+
 export const TaskSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -23,6 +34,10 @@ export const TaskSchema = z.object({
   depends_on: z.array(z.string()),
   conflicts_with: z.array(z.string()).default([]),
   priority: TaskPriority,
+  complexity: TaskComplexity.default("integration"),
+  steps: z.array(TaskStepSchema).default([]),
+  verify_command: z.string().optional(),
+  retry_count: z.number().default(0),
   estimated_minutes: z.number().optional(),
   issue_number: z.number().optional(),
   status: TaskStatus,
@@ -32,7 +47,7 @@ export type Task = z.infer<typeof TaskSchema>;
 
 // ─── Plan ────────────────────────────────────────────────────────
 
-export const PlanStatus = z.enum(["draft", "approved", "building", "reviewing", "done"]);
+export const PlanStatus = z.enum(["designing", "draft", "approved", "building", "reviewing", "done"]);
 export type PlanStatus = z.infer<typeof PlanStatus>;
 
 export const PlanSchema = z.object({
@@ -40,6 +55,7 @@ export const PlanSchema = z.object({
   projectRoot: z.string(),
   repo: z.string(),
   description: z.string(),
+  design_doc: z.string().optional(),
   created_at: z.string(),
   updated_at: z.string(),
   status: PlanStatus,
@@ -143,6 +159,11 @@ export const ForgeConfigSchema = z.object({
     stagger_seconds: z.number().default(30),
     timeout_minutes: z.number().default(30),
     allowed_tools: z.array(z.string()).default([]),
+    model_routing: z.object({
+      mechanical: z.string().default("haiku"),
+      integration: z.string().default("sonnet"),
+      architecture: z.string().default("opus"),
+    }).default({}),
   }),
   review: z.object({
     enabled: z.boolean().default(true),
