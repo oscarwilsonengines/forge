@@ -327,7 +327,8 @@ bot.onText(/\/clone-all(?:\s+(.+))?/, async (msg, match) => {
       }
 
       try {
-        execSync(`git clone "${repo.url}" "${clonePath}"`, { encoding: "utf-8", timeout: 120_000, stdio: "pipe" });
+        const cloneUrl = repo.url.endsWith(".git") ? repo.url : `${repo.url}.git`;
+        execSync(`git clone "${cloneUrl}" "${clonePath}"`, { encoding: "utf-8", timeout: 120_000, stdio: "pipe" });
         cloned++;
       } catch (e) {
         failed++;
