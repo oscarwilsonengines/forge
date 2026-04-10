@@ -273,7 +273,7 @@ bot.onText(/\/clone(?:\s+(.+))?/, async (msg, match) => {
       await bot.sendMessage(msg.chat.id, `Cloning \`${repoArg}\` to \`${clonePath}\`...`, { parse_mode: "Markdown" });
       const cloneUrl = repoArg.includes("://") || repoArg.includes("@")
         ? repoArg
-        : `git@github.com:${repoArg}.git`;
+        : `https://github.com/${repoArg}.git`;
       const result = execSync(`git clone "${cloneUrl}" "${clonePath}"`, { encoding: "utf-8", timeout: 120_000 }).trim();
       await bot.sendMessage(msg.chat.id, `Cloned \`${repoName}\`. Use \`/target ${repoName}\` to switch to it.`, { parse_mode: "Markdown" });
     }
@@ -298,7 +298,7 @@ bot.onText(/\/clone-all(?:\s+(.+))?/, async (msg, match) => {
 
     // Use gh to list all repos
     const repoList = execSync(
-      `gh repo list ${org} --limit 100 --json name,sshUrl --jq '.[] | .name + " " + .sshUrl'`,
+      `gh repo list ${org} --limit 100 --json name,url --jq '.[] | .name + " " + .url'`,
       { encoding: "utf-8", timeout: 30_000 },
     ).trim();
 
