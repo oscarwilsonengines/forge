@@ -704,6 +704,7 @@ function chatWithClaude(chatId: number, userMessage: string): string {
   const fullPrompt = `${systemPrompt}\n${conversationContext}User: ${userMessage}\n\nRespond concisely:`;
 
   const active = getActiveTarget(chatId);
+  const isRoot = process.getuid?.() === 0;
   const result = spawnSync("claude", [
     "--model", config.agents.model,
     "--max-turns", "5",
@@ -715,6 +716,7 @@ function chatWithClaude(chatId: number, userMessage: string): string {
     encoding: "utf-8",
     timeout: 120_000,
     cwd: active.path,
+    ...(isRoot ? { uid: 1001, gid: 1001 } : {}),
   });
   if (result.error) throw result.error;
   const rawOutput = result.stdout;
