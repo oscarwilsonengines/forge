@@ -28,6 +28,24 @@ export function buildWorkerPrompt(opts: SpawnOptions): string {
       ? `\n## Conflicts\nThis task may conflict with: ${task.conflicts_with.map((c) => `\`${c}\``).join(", ")}.\nCoordinate carefully and avoid editing the same files when possible.\n`
       : "";
 
+  const stepsBlock = task.steps && task.steps.length > 0
+    ? `\n## Implementation Steps\nFollow these steps in order:\n${task.steps.map((s, i) => {
+        let step = `\n### Step ${i + 1}: ${s.action}`;
+        if (s.code) step += `\n\`\`\`\n${s.code}\n\`\`\``;
+        if (s.verify) step += `\nVerify: \`${s.verify}\``;
+        if (s.expected) step += `\nExpected: ${s.expected}`;
+        return step;
+      }).join("\n")}\n`
+    : "";
+
+  const verifyBlock = task.verify_command
+    ? `\n## Verification (REQUIRED)
+Before claiming DONE, you MUST run:
+  \`${task.verify_command}\`
+Include the FULL output in your final message.
+If verification fails, fix the issue. Do NOT claim done with failing verification.\n`
+    : "";
+
   return `# Forge Worker Agent — Task #${issueRef || task.id}
 
 You are a Forge worker agent. You have ONE job: complete the task below.
@@ -40,7 +58,7 @@ ${task.description}
 
 ## Acceptance Criteria
 ${criteriaList}
-${dependencyBlock}${conflictBlock}
+${dependencyBlock}${conflictBlock}${stepsBlock}${verifyBlock}
 ## Instructions
 1. Read CLAUDE.md for project conventions before writing any code.
 2. Implement the task, working ONLY on files relevant to this task.
@@ -60,6 +78,13 @@ ${dependencyBlock}${conflictBlock}
 ## Progress Reporting
 After completing each acceptance criterion, comment on the issue:
 \`gh issue comment ${issueRef} --repo ${repoFullName} --body "Progress: completed [criterion]. (X/${totalCriteria} done)"\`
+
+## Status Protocol
+End your final message with EXACTLY ONE of these status lines:
+- \`STATUS: DONE\` — All criteria met, verification passes
+- \`STATUS: DONE_WITH_CONCERNS\` — Complete but flagging issues: [explain]
+- \`STATUS: NEEDS_CONTEXT\` — Blocked on missing information: [what you need]
+- \`STATUS: BLOCKED\` — Cannot proceed: [why]
 
 ## Constraints
 - Do NOT modify files outside your task's scope.

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
+import "dotenv/config";
 
 import { Command } from "commander";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import chalk from "chalk";
 import ora from "ora";
 import { loadConfig } from "../config.js";
@@ -11,6 +12,9 @@ import { StateManager } from "../core/state-manager.js";
 import { Scheduler } from "../core/scheduler.js";
 import { Notifier } from "../core/notifier.js";
 import { LocalEngine } from "../execution/local-engine.js";
+import { RemoteEngine } from "../execution/remote-engine.js";
+import { HttpEngine } from "../execution/http-engine.js";
+import type { ExecutionEngine } from "../execution/engine.js";
 import { GitHubManager } from "../github/manager.js";
 import { ReviewPipeline } from "../review/pipeline.js";
 import { log } from "../utils/logger.js";
@@ -22,7 +26,7 @@ interface ForgeServices {
   config: ForgeConfig;
   state: StateManager;
   github: GitHubManager;
-  engine: LocalEngine;
+  engine: ExecutionEngine;
   notifier: Notifier;
   scheduler: Scheduler;
 }
@@ -42,7 +46,13 @@ function createServices(config: ForgeConfig, projectRoot?: string): ForgeService
   const state = new StateManager(root);
   const github = new GitHubManager(config.github);
   github.setCwd(root);
-  const engine = new LocalEngine(state.forgeDir);
+  // Pick engine based on host config
+  const firstHost = Object.values(config.hosts)[0];
+  const engine: ExecutionEngine = firstHost?.type === "http"
+    ? new HttpEngine(firstHost.url!, process.env[firstHost.api_token_env || ""] || "", state.forgeDir)
+    : firstHost?.type === "ssh"
+      ? new RemoteEngine(state.forgeDir, firstHost)
+      : new LocalEngine(state.forgeDir);
   const notifier = new Notifier(config.notifications, config.telegram);
   const repoFullName = state.loadPlan()?.repo ?? github.getRepoFullName() ?? `${config.github.org}/unknown`;
   const scheduler = new Scheduler(state, engine, github, notifier, {
@@ -95,15 +105,16 @@ interface RawTaskData {
 }
 
 function parsePlanOutput(rawOutput: string): RawTaskData[] {
-  let parsed: { result?: string } & Record<string, unknown>;
+  // Try to parse as JSON envelope (--output-format json mode)
+  let content = rawOutput;
   try {
-    parsed = JSON.parse(rawOutput);
-  } catch {
-    throw new Error("Claude returned invalid JSON");
-  }
-  const content = typeof parsed.result === "string" ? parsed.result : rawOutput;
+    const parsed = JSON.parse(rawOutput) as { result?: string };
+    if (typeof parsed.result === "string") content = parsed.result;
+  } catch { /* raw text output, use as-is */ }
+  // Strip markdown code fences
+  content = content.replace(/```json\s*/g, "").replace(/```\s*/g, "");
   const jsonMatch = content.match(/\{[\s\S]*"tasks"[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("Could not find tasks JSON in Claude output");
+  if (!jsonMatch) throw new Error(`Could not find tasks JSON in Claude output. Got: ${content.substring(0, 200)}`);
   const tasksData = JSON.parse(jsonMatch[0]) as { tasks: RawTaskData[] };
   return tasksData.tasks;
 }
@@ -115,6 +126,7 @@ function buildTasksFromRaw(rawTasks: RawTaskData[], github: GitHubManager, repo:
       id: raw.id, title: raw.title, description: raw.description,
       acceptance_criteria: raw.acceptance_criteria, depends_on: raw.depends_on,
       conflicts_with: [], priority: raw.priority,
+      complexity: "integration", steps: [], retry_count: 0,
       estimated_minutes: raw.estimated_minutes, status: "todo",
     };
     try { task.issue_number = github.createIssue(repo, task); }
@@ -127,7 +139,7 @@ function buildTasksFromRaw(rawTasks: RawTaskData[], github: GitHubManager, repo:
 function buildAgentHandle(agent: import("../types.js").Agent) {
   return {
     id: agent.id,
-    engineType: (agent.host === "local" ? "local" : "ssh") as "local" | "ssh",
+    engineType: agent.engine_type ?? "local" as "local" | "ssh" | "http",
     pid: agent.pid, host: agent.host,
     worktreePath: agent.worktree_path,
     outputPath: agent.output_path,
@@ -183,15 +195,96 @@ program.command("init").argument("[repo]", "Repository (owner/repo) to clone and
 program.command("plan").argument("<description>", "Description of work to plan")
   .action(async (description: string) => {
     const config = loadConfig();
-    const { state, github } = createServices(config);
+    const github = new GitHubManager(config.github);
+    github.setCwd(process.cwd());
+
+    // Smart repo detection — find or create
+    let repoFullName = github.getRepoFullName();
+
+    if (!repoFullName) {
+      // No git repo here — ask and create one
+      console.log(chalk.yellow("\nNo git repo detected in this directory."));
+      const dirName = process.cwd().split(/[/\\]/).pop() || "project";
+
+      const { default: inquirer } = await import("inquirer");
+      const { account } = await inquirer.prompt([{
+        type: "list",
+        name: "account",
+        message: "Which GitHub account should own this repo?",
+        choices: [
+          { name: "zanijr (personal)", value: "zanijr" },
+          { name: "ZbOscar (company)", value: "ZbOscar" },
+        ],
+      }]);
+
+      const { repoName } = await inquirer.prompt([{
+        type: "input",
+        name: "repoName",
+        message: "Repo name:",
+        default: dirName,
+      }]);
+
+      const { visibility } = await inquirer.prompt([{
+        type: "list",
+        name: "visibility",
+        message: "Visibility:",
+        choices: ["private", "public"],
+        default: "private",
+      }]);
+
+      const spinner0 = ora(`Creating ${account}/${repoName}...`).start();
+      try {
+        // Init git if needed
+        try { execSync("git rev-parse --git-dir", { stdio: "pipe", cwd: process.cwd() }); }
+        catch { execSync("git init", { stdio: "pipe", cwd: process.cwd() }); }
+
+        // Create initial commit if empty
+        try { execSync("git log -1", { stdio: "pipe", cwd: process.cwd() }); }
+        catch {
+          execSync('git add -A && git commit --allow-empty -m "Initial commit"', {
+            stdio: "pipe", cwd: process.cwd(),
+          });
+        }
+
+        // Create remote repo and push
+        const visFlag = visibility === "public" ? "--public" : "--private";
+        execSync(`gh repo create ${account}/${repoName} ${visFlag} --source . --push`, {
+          stdio: "pipe", cwd: process.cwd(), encoding: "utf-8",
+        });
+
+        repoFullName = `${account}/${repoName}`;
+        github.setCwd(process.cwd());
+
+        // Set up forge labels
+        github.bootstrapLabels(repoFullName);
+        spinner0.succeed(`Created ${repoFullName}`);
+      } catch (err) {
+        spinner0.fail("Failed to create repo");
+        log.error(String(err));
+        process.exit(1);
+      }
+    } else {
+      // Repo exists — ensure forge labels
+      try { github.bootstrapLabels(repoFullName); } catch { /* labels may exist */ }
+    }
+
+    const { state } = createServices(config);
     const spinner = ora("Planning tasks with Claude...").start();
     try {
-      const repoFullName = github.getRepoFullName() ?? `${config.github.org}/unknown`;
       const planPrompt = buildPlanPrompt(description);
-      const rawOutput = execSync(
-        `claude --model ${config.agents.boss_model} --max-turns 3 --output-format json -p ${JSON.stringify(planPrompt)}`,
-        { encoding: "utf-8", cwd: process.cwd() },
-      );
+      const result = spawnSync("claude", [
+        "--model", config.agents.boss_model,
+        "--max-turns", "5",
+        "-p", "-",
+      ], {
+        input: planPrompt,
+        encoding: "utf-8",
+        cwd: process.cwd(),
+        timeout: 300_000,
+      });
+      if (result.error) throw result.error;
+      const rawOutput = result.stdout;
+      if (!rawOutput) throw new Error(result.stderr || `claude exited with code ${result.status}`);
       const rawTasks = parsePlanOutput(rawOutput);
       spinner.text = "Creating GitHub Issues...";
       const tasks = buildTasksFromRaw(rawTasks, github, repoFullName);

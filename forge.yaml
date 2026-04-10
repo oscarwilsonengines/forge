@@ -15,16 +15,18 @@ github:
     - { name: "priority:p2",       color: "fbca04", description: "Do eventually" }
 
 hosts:
-  local:
-    type: "local"
-    max_agents: 5
-  # remote:
+  server:
+    type: "http"
+    url: "https://forge.bozits.com"
+    api_token_env: "FORGE_API_TOKEN"
+    max_agents: 10
+  # Fallback SSH (when on LAN)
+  # server-ssh:
   #   type: "ssh"
-  #   host: "172.16.2.135"
-  #   user: "zach"
-  #   key: "~/.ssh/id_ed25519"
-  #   max_agents: 5
-  #   claude_path: "claude"
+  #   host: "192.168.12.111"
+  #   user: "zbonham"
+  #   max_agents: 10
+  #   claude_path: "/usr/local/bin/claude"
 
 agents:
   model: "sonnet"
@@ -74,6 +76,18 @@ telegram:
     - "agent_failed"
     - "review_ready"
     - "all_done"
+
+deploy:
+  # Reverse SSH tunnel — server reaches Windows PC via localhost:2222
+  pc:
+    ssh_host: "localhost"
+    ssh_port: 2222
+    ssh_user: "zbonham"
+    drives:
+      Q: "\\\\172.16.2.115\\Main"           # DocumentEngine, apps
+      T: "\\\\172.16.2.115\\wwwroot"        # Web apps, FormsEditor
+      W: "\\\\172.16.2.115\\scripts"        # Scripts, DynaChange
+    projects_dir: "C:\\Users\\zbonham\\source\\repos"
 
 state:
   dir: ".forge"

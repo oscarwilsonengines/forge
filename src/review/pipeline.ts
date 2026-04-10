@@ -89,6 +89,7 @@ export class ReviewPipeline {
       "--model", opts.model,
       "--max-turns", "10",
       "--output-format", "json",
+      "--permission-mode", "bypassPermissions",
     ], {
       cwd: opts.projectRoot,
       detached: true,

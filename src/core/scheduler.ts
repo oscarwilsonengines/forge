@@ -5,13 +5,21 @@ import type { StateManager } from "./state-manager.js";
 import type { ExecutionEngine, SpawnOptions } from "../execution/engine.js";
 import type { Notifier } from "./notifier.js";
 import type { GitHubManager } from "../github/manager.js";
+import { SpecReviewer } from "./spec-reviewer.js";
 import { log } from "../utils/logger.js";
+
+interface ModelRouting {
+  mechanical: string;
+  integration: string;
+  architecture: string;
+}
 
 interface SchedulerConfig {
   staggerSeconds: number;
   heartbeatInterval: number;
   maxAgents: number;
   model: string;
+  modelRouting?: ModelRouting;
   maxTurns: number;
   allowedTools: string[];
   timeoutMinutes: number;
@@ -73,11 +81,13 @@ export class Scheduler {
     for (const task of readyTasks) {
       if (runningAgents.length + spawned >= this.config.maxAgents) break;
 
+      const model = this.config.modelRouting?.[task.complexity ?? "integration"]
+        ?? this.config.model;
       const spawnOpts: SpawnOptions = {
         task,
         repoFullName: this.config.repoFullName,
         projectRoot: this.config.projectRoot,
-        model: this.config.model,
+        model,
         maxTurns: this.config.maxTurns,
         allowedTools: this.config.allowedTools,
       };
@@ -92,7 +102,8 @@ export class Scheduler {
           task_id: task.id,
           pid: handle.pid,
           host: handle.host,
-          model: this.config.model,
+          engine_type: handle.engineType,
+          model,
           started_at: handle.startedAt,
           last_heartbeat: handle.startedAt,
           status: "running",
@@ -165,7 +176,7 @@ export class Scheduler {
     for (const agent of agents) {
       const handle: WorkerHandle = {
         id: agent.id,
-        engineType: agent.host === "local" ? "local" : "ssh",
+        engineType: agent.engine_type ?? "local",
         pid: agent.pid,
         host: agent.host,
         worktreePath: agent.worktree_path,
@@ -176,25 +187,66 @@ export class Scheduler {
       const alive = await this.engine.isAlive(handle);
 
       if (!alive) {
-        // Agent finished — check exit code
+        // Agent finished — check exit code and output for errors
         const exitCode = await this.engine.getExitCode(handle);
         const output = await this.engine.getOutput(handle);
 
-        if (exitCode === 0 && output) {
-          this.state.saveAgent({ ...agent, status: "completed", finished_at: new Date().toISOString(), exit_code: 0 });
-          this.state.updateTask(agent.task_id, { status: "done" });
-          log.success(`Agent ${agent.id} completed`);
-          await this.notifier.notify("agent_complete", `Agent Complete: ${agent.id}`, `Task ${agent.task_id} finished successfully.`);
+        // Check for is_error in JSON output (catches "Not logged in" etc.)
+        const hasOutputError = output ? this.checkOutputForError(output) : false;
+
+        if (exitCode === 0 && output && !hasOutputError) {
+          // Agent succeeded — run spec review before marking done
+          const plan = this.state.loadPlan();
+          const task = plan?.tasks.find((t) => t.id === agent.task_id);
+
+          if (task) {
+            this.state.updateTask(agent.task_id, { status: "review" });
+            log.info(`Agent ${agent.id} finished — running spec review for ${task.id}`);
+
+            const reviewer = new SpecReviewer(this.config.modelRouting?.mechanical ?? "haiku");
+            const reviewResult = await reviewer.review(task, this.config.projectRoot);
+
+            if (reviewResult.pass) {
+              this.state.saveAgent({ ...agent, status: "completed", finished_at: new Date().toISOString(), exit_code: 0 });
+              this.state.updateTask(agent.task_id, { status: "done" });
+              log.success(`Agent ${agent.id} completed — spec review passed`);
+              await this.notifier.notify("agent_complete", `Agent Complete: ${agent.id}`, `Task ${agent.task_id} passed spec review.`);
+            } else if ((task.retry_count ?? 0) < 2) {
+              // Retry with feedback
+              const feedback = reviewResult.reasons.join("; ");
+              const newRetryCount = (task.retry_count ?? 0) + 1;
+              this.state.saveAgent({ ...agent, status: "failed", finished_at: new Date().toISOString(), exit_code: 0 });
+              this.state.updateTask(agent.task_id, {
+                status: "todo",
+                assigned_to: undefined,
+                retry_count: newRetryCount,
+                description: `${task.description}\n\n--- Spec Review Feedback (retry ${newRetryCount}) ---\n${feedback}`,
+              });
+              log.warn(`Agent ${agent.id} spec review failed (retry ${newRetryCount}/2): ${feedback}`);
+              await this.notifier.notify("agent_retry", `Agent Retry: ${agent.id}`, `Spec review failed: ${feedback}`);
+            } else {
+              // Max retries exhausted
+              this.state.saveAgent({ ...agent, status: "failed", finished_at: new Date().toISOString(), exit_code: 0 });
+              this.state.updateTask(agent.task_id, { status: "failed" });
+              log.error(`Agent ${agent.id} spec review failed after max retries`);
+              await this.notifier.notify("agent_failed", `Agent Failed: ${agent.id}`, `Spec review failed after 2 retries.`);
+            }
+          } else {
+            // No task found — just mark done
+            this.state.saveAgent({ ...agent, status: "completed", finished_at: new Date().toISOString(), exit_code: 0 });
+            log.success(`Agent ${agent.id} completed`);
+          }
         } else {
           // Check timeout
           const runtime = Date.now() - new Date(agent.started_at).getTime();
           const timeoutMs = this.config.timeoutMinutes * 60 * 1000;
           const status = runtime > timeoutMs ? "timeout" : "failed";
+          const reason = hasOutputError ? " (output contained error)" : "";
 
           this.state.saveAgent({ ...agent, status, finished_at: new Date().toISOString(), exit_code: exitCode ?? -1 });
           this.state.updateTask(agent.task_id, { status: "failed" });
-          log.error(`Agent ${agent.id} ${status}`);
-          await this.notifier.notify("agent_failed", `Agent Failed: ${agent.id}`, `Task ${agent.task_id} ${status}.`);
+          log.error(`Agent ${agent.id} ${status}${reason}`);
+          await this.notifier.notify("agent_failed", `Agent Failed: ${agent.id}`, `Task ${agent.task_id} ${status}${reason}.`);
         }
 
         // Update GitHub Issue
@@ -227,6 +279,16 @@ export class Scheduler {
     }
 
     this.state.generateProjectState();
+  }
+
+  /** Check worker output JSON for is_error flag */
+  private checkOutputForError(output: string): boolean {
+    try {
+      const parsed = JSON.parse(output);
+      return parsed.is_error === true;
+    } catch {
+      return false;
+    }
   }
 
   /** Get a formatted status string */
@@ -299,7 +361,7 @@ export class Scheduler {
     for (const agent of agents) {
       const handle: WorkerHandle = {
         id: agent.id,
-        engineType: agent.host === "local" ? "local" : "ssh",
+        engineType: agent.engine_type ?? "local",
         pid: agent.pid,
         host: agent.host,
         worktreePath: agent.worktree_path,

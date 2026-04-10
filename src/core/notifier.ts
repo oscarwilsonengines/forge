@@ -3,7 +3,7 @@ import { platform } from "node:os";
 import type { ForgeConfig } from "../types.js";
 import { log } from "../utils/logger.js";
 
-type NotifyEvent = "agent_complete" | "agent_failed" | "review_ready" | "all_done" | "blocked_task";
+type NotifyEvent = "agent_complete" | "agent_failed" | "agent_retry" | "review_ready" | "all_done" | "blocked_task";
 
 export class Notifier {
   private config: ForgeConfig["notifications"];

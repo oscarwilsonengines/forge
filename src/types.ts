@@ -15,6 +15,17 @@ export type TaskStatus = z.infer<typeof TaskStatus>;
 export const TaskPriority = z.enum(["p0", "p1", "p2"]);
 export type TaskPriority = z.infer<typeof TaskPriority>;
 
+export const TaskComplexity = z.enum(["mechanical", "integration", "architecture"]);
+export type TaskComplexity = z.infer<typeof TaskComplexity>;
+
+export const TaskStepSchema = z.object({
+  action: z.string(),
+  code: z.string().optional(),
+  verify: z.string().optional(),
+  expected: z.string().optional(),
+});
+export type TaskStep = z.infer<typeof TaskStepSchema>;
+
 export const TaskSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -23,6 +34,10 @@ export const TaskSchema = z.object({
   depends_on: z.array(z.string()),
   conflicts_with: z.array(z.string()).default([]),
   priority: TaskPriority,
+  complexity: TaskComplexity.default("integration"),
+  steps: z.array(TaskStepSchema).default([]),
+  verify_command: z.string().optional(),
+  retry_count: z.number().default(0),
   estimated_minutes: z.number().optional(),
   issue_number: z.number().optional(),
   status: TaskStatus,
@@ -32,7 +47,7 @@ export type Task = z.infer<typeof TaskSchema>;
 
 // ─── Plan ────────────────────────────────────────────────────────
 
-export const PlanStatus = z.enum(["draft", "approved", "building", "reviewing", "done"]);
+export const PlanStatus = z.enum(["designing", "draft", "approved", "building", "reviewing", "done"]);
 export type PlanStatus = z.infer<typeof PlanStatus>;
 
 export const PlanSchema = z.object({
@@ -40,6 +55,7 @@ export const PlanSchema = z.object({
   projectRoot: z.string(),
   repo: z.string(),
   description: z.string(),
+  design_doc: z.string().optional(),
   created_at: z.string(),
   updated_at: z.string(),
   status: PlanStatus,
@@ -59,11 +75,15 @@ export const AgentStatus = z.enum([
 ]);
 export type AgentStatus = z.infer<typeof AgentStatus>;
 
+export const EngineType = z.enum(["local", "ssh", "http"]);
+export type EngineType = z.infer<typeof EngineType>;
+
 export const AgentSchema = z.object({
   id: z.string(),
   task_id: z.string(),
   pid: z.number().optional(),
   host: z.string(),
+  engine_type: EngineType.default("local"),
   model: z.string(),
   started_at: z.string(),
   finished_at: z.string().optional(),
@@ -107,10 +127,12 @@ export type Finding = z.infer<typeof FindingSchema>;
 // ─── Configuration ───────────────────────────────────────────────
 
 export const HostConfigSchema = z.object({
-  type: z.enum(["local", "ssh"]),
+  type: z.enum(["local", "ssh", "http"]),
   host: z.string().optional(),
   user: z.string().optional(),
   key: z.string().optional(),
+  url: z.string().optional(),
+  api_token_env: z.string().optional(),
   max_agents: z.number().default(5),
   claude_path: z.string().default("claude"),
 });
@@ -137,6 +159,11 @@ export const ForgeConfigSchema = z.object({
     stagger_seconds: z.number().default(30),
     timeout_minutes: z.number().default(30),
     allowed_tools: z.array(z.string()).default([]),
+    model_routing: z.object({
+      mechanical: z.string().default("haiku"),
+      integration: z.string().default("sonnet"),
+      architecture: z.string().default("opus"),
+    }).default({}),
   }),
   review: z.object({
     enabled: z.boolean().default(true),
@@ -155,6 +182,15 @@ export const ForgeConfigSchema = z.object({
     chat_id_env: z.string().default("FORGE_TELEGRAM_CHAT"),
     notify_on: z.array(z.string()).default([]),
   }).optional(),
+  deploy: z.object({
+    pc: z.object({
+      ssh_host: z.string().default("localhost"),
+      ssh_port: z.number().default(2222),
+      ssh_user: z.string().default("zbonham"),
+      drives: z.record(z.string(), z.string()).default({}),
+      projects_dir: z.string().default("C:\\Users\\zbonham\\source\\repos"),
+    }).optional(),
+  }).optional(),
   state: z.object({
     dir: z.string().default(".forge"),
     heartbeat_interval: z.number().default(60),
@@ -166,7 +202,7 @@ export type ForgeConfig = z.infer<typeof ForgeConfigSchema>;
 
 export interface WorkerHandle {
   id: string;
-  engineType: "local" | "ssh";
+  engineType: "local" | "ssh" | "http";
   pid?: number;
   host: string;
   worktreePath: string;

@@ -1,0 +1,46 @@
+services:
+  forge-worker:
+    build: .
+    container_name: forge-worker
+    network_mode: host
+    privileged: true
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GH_TOKEN=${GH_TOKEN}
+      - FORGE_API_TOKEN=${FORGE_API_TOKEN}
+      - FORGE_MAX_AGENTS=10
+    volumes:
+      - forge-repos:/repos
+      - forge-state:/app/.forge
+      - ${HOME}/.claude:/home/forge/.claude
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8787/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  forge-telegram:
+    build: .
+    container_name: forge-telegram
+    network_mode: host
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - FORGE_TELEGRAM_TOKEN=${FORGE_TELEGRAM_TOKEN}
+      - FORGE_TELEGRAM_CHAT=${FORGE_TELEGRAM_CHAT}
+      - GH_TOKEN=${GH_TOKEN}
+      - FORGE_API_TOKEN=${FORGE_API_TOKEN}
+      - FORGE_PROJECTS_DIR=/repos
+    volumes:
+      - forge-repos:/repos
+      - forge-state:/app/.forge
+      - ${HOME}/.claude:/home/forge/.claude
+    restart: unless-stopped
+    depends_on:
+      forge-worker:
+        condition: service_healthy
+    command: ["node", "dist/interfaces/telegram-bot.js"]
+
+volumes:
+  forge-repos:
+  forge-state:

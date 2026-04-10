@@ -1,3 +1,54 @@
+import type { Task } from "../types.js";
+
+/** Build a spec review prompt for per-task verification */
+export function buildSpecReviewPrompt(task: Task, diff: string): string {
+  const criteria = task.acceptance_criteria
+    .map((c, i) => `${i + 1}. ${c}`)
+    .join("\n");
+
+  const verifySection = task.verify_command
+    ? `\n## Verification Command\nRun this command and check the output:\n\`${task.verify_command}\`\n`
+    : "";
+
+  return `# Spec Compliance Review
+
+You are reviewing whether a task implementation meets its acceptance criteria.
+
+## Task: ${task.title}
+
+${task.description}
+
+## Acceptance Criteria
+${criteria}
+${verifySection}
+## Git Diff
+\`\`\`
+${diff}
+\`\`\`
+
+## Instructions
+1. Check each acceptance criterion against the diff
+2. ${task.verify_command ? `Run \`${task.verify_command}\` and check the output` : "Run any tests in the changed files"}
+3. Output ONLY a JSON object (no other text):
+
+\`\`\`json
+{
+  "pass": true,
+  "reasons": ["All criteria met", "Tests pass"]
+}
+\`\`\`
+
+Or if failing:
+\`\`\`json
+{
+  "pass": false,
+  "reasons": ["Criterion 2 not met: missing input validation", "Tests fail: 2 errors"]
+}
+\`\`\`
+
+Be strict. If a criterion is partially met, it's a fail.`;
+}
+
 /** Build a review prompt for a specific reviewer type */
 export function buildReviewPrompt(
   reviewType: string,

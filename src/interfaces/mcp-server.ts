@@ -1,15 +1,19 @@
+import "dotenv/config";
+import { join } from "node:path";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { loadConfig } from "../config.js";
 import { StateManager } from "../core/state-manager.js";
 import { Scheduler } from "../core/scheduler.js";
 import { Notifier } from "../core/notifier.js";
 import { LocalEngine } from "../execution/local-engine.js";
+import { RemoteEngine } from "../execution/remote-engine.js";
+import { HttpEngine } from "../execution/http-engine.js";
 import { GitHubManager } from "../github/manager.js";
 import { ReviewPipeline } from "../review/pipeline.js";
 import type { ForgeConfig, Plan, Task } from "../types.js";
@@ -34,7 +38,12 @@ function createServices(explicitProjectRoot?: string) {
   const state = new StateManager(projectRoot);
   const github = new GitHubManager(config.github);
   github.setCwd(projectRoot);
-  const engine = new LocalEngine(state.forgeDir);
+  const firstHost = Object.values(config.hosts)[0];
+  const engine = firstHost?.type === "http"
+    ? new HttpEngine(firstHost.url!, process.env[firstHost.api_token_env || ""] || "", state.forgeDir)
+    : firstHost?.type === "ssh"
+      ? new RemoteEngine(state.forgeDir, firstHost)
+      : new LocalEngine(state.forgeDir);
   const notifier = new Notifier(config.notifications, config.telegram);
   const repoFullName = state.loadPlan()?.repo ?? github.getRepoFullName() ?? `${config.github.org}/unknown`;
   const scheduler = new Scheduler(state, engine, github, notifier, {
@@ -42,6 +51,7 @@ function createServices(explicitProjectRoot?: string) {
     heartbeatInterval: config.state.heartbeat_interval,
     maxAgents: Object.values(config.hosts).reduce((sum, h) => sum + h.max_agents, 0),
     model: config.agents.model,
+    modelRouting: config.agents.model_routing,
     maxTurns: config.agents.max_turns,
     allowedTools: config.agents.allowed_tools,
     timeoutMinutes: config.agents.timeout_minutes,
@@ -74,6 +84,18 @@ function buildPlanPrompt(description: string): string {
 // ─── Tool Definitions ─────────────────────────────────────────
 
 const TOOLS = [
+  {
+    name: "forge_design",
+    description: "Brainstorm and create a design spec before planning. Explores approaches, trade-offs, and writes a structured design doc.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        description: { type: "string", description: "Description of the feature or system to design" },
+        projectRoot: { type: "string", description: "Absolute path to the target project directory (optional)" },
+      },
+      required: ["description"],
+    },
+  },
   {
     name: "forge_plan",
     description: "Create a plan from a project description. Calls Claude to decompose work into tasks and creates GitHub Issues.",
@@ -130,25 +152,124 @@ const TOOLS = [
   },
 ];
 
+// ─── Brainstorm Prompt ────────────────────────────────────────
+
+function buildDesignPrompt(description: string): string {
+  return [
+    "You are a software architect. Your job is to explore a feature idea and produce a structured design spec.",
+    "",
+    `Feature: ${description}`,
+    "",
+    "Process:",
+    "1. Identify 2-3 possible approaches to implementing this feature",
+    "2. For each approach, describe: architecture, key components, trade-offs (pros/cons)",
+    "3. Recommend one approach with clear reasoning",
+    "4. Write a structured design spec for the recommended approach",
+    "",
+    "Output a markdown document with these sections:",
+    "",
+    "# Design: [Feature Name]",
+    "",
+    "## Approaches Considered",
+    "### Approach 1: [Name]",
+    "- Architecture: ...",
+    "- Pros: ...",
+    "- Cons: ...",
+    "(repeat for each approach)",
+    "",
+    "## Recommended Approach",
+    "[Which and why]",
+    "",
+    "## Architecture",
+    "[High-level design of the recommended approach]",
+    "",
+    "## Components",
+    "[Key modules/classes/services with responsibilities]",
+    "",
+    "## Data Flow",
+    "[How data moves through the system]",
+    "",
+    "## Testing Strategy",
+    "[How to verify this works]",
+    "",
+    "## Open Questions",
+    "[Anything that needs clarification before implementation]",
+    "",
+    "Output ONLY the markdown document, no other text.",
+  ].join("\n");
+}
+
 // ─── Tool Handlers ────────────────────────────────────────────
+
+async function handleDesign(description: string, targetRoot?: string): Promise<string> {
+  const { config, state, projectRoot } = createServices(targetRoot);
+  const designPrompt = buildDesignPrompt(description);
+
+  const result = spawnSync("claude", [
+    "--model", config.agents.boss_model,
+    "--max-turns", "5",
+    "-p", "-",
+  ], {
+    input: designPrompt,
+    encoding: "utf-8",
+    cwd: projectRoot,
+    timeout: 300_000,
+  });
+  if (result.error) throw result.error;
+  const rawOutput = result.stdout;
+  if (!rawOutput) throw new Error(result.stderr || `claude exited with code ${result.status}`);
+
+  let content = rawOutput;
+  try {
+    const envelope = JSON.parse(rawOutput) as { result?: string };
+    if (typeof envelope.result === "string") content = envelope.result;
+  } catch { /* raw text, use as-is */ }
+
+  // Save design doc
+  const designPath = join(state.forgeDir, "design.md");
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(designPath, content);
+
+  // Create or update plan with designing status
+  const existingPlan = state.loadPlan();
+  if (existingPlan) {
+    existingPlan.status = "designing";
+    existingPlan.design_doc = designPath;
+    existingPlan.updated_at = new Date().toISOString();
+    state.savePlan(existingPlan);
+  }
+
+  state.generateProjectState();
+  return `Design saved to ${designPath}\n\n${content}\n\nReview the design above. When ready, run forge_plan to decompose into tasks.`;
+}
 
 async function handlePlan(description: string, targetRoot?: string): Promise<string> {
   const { config, state, github, projectRoot } = createServices(targetRoot);
   const repoFullName = github.getRepoFullName() ?? `${config.github.org}/unknown`;
   const planPrompt = buildPlanPrompt(description);
 
-  const rawOutput = execSync(
-    `claude --model ${config.agents.boss_model} --max-turns 3 --output-format json -p ${JSON.stringify(planPrompt)}`,
-    { encoding: "utf-8", cwd: projectRoot },
-  );
+  const result = spawnSync("claude", [
+    "--model", config.agents.boss_model,
+    "--max-turns", "5",
+    "-p", "-",
+  ], {
+    input: planPrompt,
+    encoding: "utf-8",
+    cwd: projectRoot,
+    timeout: 300_000,
+  });
+  if (result.error) throw result.error;
+  const rawOutput = result.stdout;
+  if (!rawOutput) throw new Error(result.stderr || `claude exited with code ${result.status}`);
 
-  let parsed: { result?: string } & Record<string, unknown>;
-  try { parsed = JSON.parse(rawOutput); }
-  catch { throw new Error("Claude returned invalid JSON"); }
-
-  const content = typeof parsed.result === "string" ? parsed.result : rawOutput;
+  let content = rawOutput;
+  try {
+    const envelope = JSON.parse(rawOutput) as { result?: string };
+    if (typeof envelope.result === "string") content = envelope.result;
+  } catch { /* raw text, use as-is */ }
+  content = content.replace(/```json\s*/g, "").replace(/```\s*/g, "");
   const jsonMatch = content.match(/\{[\s\S]*"tasks"[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("Could not find tasks JSON in Claude output");
+  if (!jsonMatch) throw new Error(`Could not find tasks JSON in Claude output. Got: ${content.substring(0, 200)}`);
 
   const tasksData = JSON.parse(jsonMatch[0]) as {
     tasks: Array<{
@@ -164,6 +285,7 @@ async function handlePlan(description: string, targetRoot?: string): Promise<str
       id: raw.id, title: raw.title, description: raw.description,
       acceptance_criteria: raw.acceptance_criteria, depends_on: raw.depends_on,
       conflicts_with: [], priority: raw.priority,
+      complexity: "integration", steps: [], retry_count: 0,
       estimated_minutes: raw.estimated_minutes, status: "todo",
     };
     try { task.issue_number = github.createIssue(repoFullName, task); }
@@ -250,7 +372,7 @@ async function handleRestart(agentId: string): Promise<string> {
   const agent = state.loadAgent(agentId);
   if (!agent) return `Error: Agent ${agentId} not found.`;
   await engine.kill({
-    id: agent.id, engineType: agent.host === "local" ? "local" : "ssh",
+    id: agent.id, engineType: agent.engine_type ?? "local",
     pid: agent.pid, host: agent.host, worktreePath: agent.worktree_path,
     outputPath: agent.output_path, startedAt: agent.started_at,
   });
@@ -274,6 +396,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     let result: string;
     switch (name) {
+      case "forge_design":
+        const designArgs = args as { description: string; projectRoot?: string };
+            result = await handleDesign(designArgs.description, designArgs.projectRoot); break;
       case "forge_plan":
         const planArgs = args as { description: string; projectRoot?: string };
             result = await handlePlan(planArgs.description, planArgs.projectRoot); break;
