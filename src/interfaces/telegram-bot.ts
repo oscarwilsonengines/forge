@@ -618,6 +618,9 @@ bot.onText(/\/deploy(?:\s+(.+))?/, async (msg, match) => {
   if (!subcommand || subcommand === "help") {
     await bot.sendMessage(msg.chat.id,
       "*Deploy Commands:*\n\n" +
+      "/deploy onprem — Deploy to all on-prem targets\n" +
+      "/deploy onprem <name> — Deploy to specific target\n" +
+      "/deploy targets — List configured targets\n" +
       "/deploy ping — Check if Windows PC is reachable\n" +
       "/deploy pull <repo> — Git pull a repo on the PC\n" +
       "/deploy drives — Show mapped drive status\n" +
@@ -691,6 +694,37 @@ bot.onText(/\/deploy(?:\s+(.+))?/, async (msg, match) => {
       const result = execOnPC(command, 120_000);
       const text = result.length > 3900 ? result.slice(0, 3900) + "\n..." : result;
       await bot.sendMessage(msg.chat.id, `\`\`\`\n${text}\n\`\`\``, { parse_mode: "Markdown" });
+      return;
+    }
+
+    // /deploy onprem [target]
+    const onpremMatch = subcommand.match(/^onprem(?:\s+(.+))?/);
+    if (onpremMatch) {
+      const { Deployer } = await import("../core/deployer.js");
+      const deployer = new Deployer(config);
+      const targetName = onpremMatch[1]?.trim();
+
+      if (targetName) {
+        await bot.sendMessage(msg.chat.id, `Deploying to \`${targetName}\`...`, { parse_mode: "Markdown" });
+        const output = await deployer.deployTo(targetName);
+        const text = output.length > 3900 ? output.slice(0, 3900) + "\n..." : output;
+        await bot.sendMessage(msg.chat.id, `Deployed to ${targetName}:\n\`\`\`\n${text}\n\`\`\``, { parse_mode: "Markdown" });
+      } else {
+        const results = await deployer.deployAll();
+        let text = "*Deploy Results:*\n";
+        for (const r of results) {
+          text += `${r.success ? "✓" : "✗"} ${r.target}: ${r.output.split("\n")[0] || "ok"}\n`;
+        }
+        await bot.sendMessage(msg.chat.id, text, { parse_mode: "Markdown" });
+      }
+      return;
+    }
+
+    // /deploy targets — list configured deploy targets
+    if (subcommand === "targets") {
+      const { Deployer } = await import("../core/deployer.js");
+      const deployer = new Deployer(config);
+      await bot.sendMessage(msg.chat.id, deployer.listTargets());
       return;
     }
 
