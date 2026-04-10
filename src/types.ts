@@ -200,7 +200,7 @@ export const ForgeConfigSchema = z.object({
       path: z.string(),
       branch: z.string().default("main"),
       commands: z.array(z.string()).default([]),
-    })).default([]),
+    })).nullish().transform(v => v ?? []),
   }).optional(),
   state: z.object({
     dir: z.string().default(".forge"),
