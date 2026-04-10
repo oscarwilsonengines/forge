@@ -9,6 +9,7 @@ export interface SpawnOptions {
   model: string;
   maxTurns: number;
   allowedTools: string[];
+  targetBranch: string;
 }
 
 // ─── Execution Engine Interface ─────────────────────────────────

@@ -57,6 +57,7 @@ function createServices(explicitProjectRoot?: string) {
     timeoutMinutes: config.agents.timeout_minutes,
     repoFullName,
     projectRoot,
+    targetBranch: config.github.target_branch,
   });
   return { config, state, github, engine, notifier, scheduler, projectRoot };
 }

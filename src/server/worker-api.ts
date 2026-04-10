@@ -126,6 +126,7 @@ async function handleSpawn(
   const opts: SpawnOptions = {
     task, repoFullName: repoFullName || "", projectRoot: repoPath,
     model: model || "sonnet", maxTurns: maxTurns || 25, allowedTools: allowedTools || [],
+    targetBranch: "main",
   };
   const prompt = buildWorkerPrompt(opts);
   writeFileSync(promptPath, prompt);

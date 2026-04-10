@@ -3,6 +3,7 @@
 github:
   org: "oscarwilsonengines"                    # GitHub org or user for new repos
   default_visibility: "private"
+  target_branch: "main"                        # PRs target this branch (use "dev" or "v3" for staging)
   labels:
     - { name: "forge:todo",        color: "0e8a16", description: "Ready for an agent" }
     - { name: "forge:in-progress", color: "fbca04", description: "Agent working on it" }

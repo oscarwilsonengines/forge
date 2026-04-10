@@ -25,6 +25,7 @@ interface SchedulerConfig {
   timeoutMinutes: number;
   repoFullName: string;
   projectRoot: string;
+  targetBranch?: string;
 }
 
 export class Scheduler {
@@ -90,6 +91,7 @@ export class Scheduler {
         model,
         maxTurns: this.config.maxTurns,
         allowedTools: this.config.allowedTools,
+        targetBranch: this.config.targetBranch || "main",
       };
 
       try {

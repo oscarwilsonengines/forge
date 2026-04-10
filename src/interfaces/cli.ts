@@ -65,6 +65,7 @@ function createServices(config: ForgeConfig, projectRoot?: string): ForgeService
     timeoutMinutes: config.agents.timeout_minutes,
     repoFullName,
     projectRoot: root,
+    targetBranch: config.github.target_branch,
   });
   return { config, state, github, engine, notifier, scheduler };
 }

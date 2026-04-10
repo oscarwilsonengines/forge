@@ -69,7 +69,7 @@ ${dependencyBlock}${conflictBlock}${stepsBlock}${verifyBlock}
    a. Push your branch:
       \`git push -u origin $(git branch --show-current)\`
    b. Create a PR:
-      \`gh pr create --repo ${repoFullName} --base main --title "feat: ${escapeTick(task.title)}" --body "Closes #${issueRef}"\`
+      \`gh pr create --repo ${repoFullName} --base ${opts.targetBranch} --title "feat: ${escapeTick(task.title)}" --body "Closes #${issueRef}"\`
    c. Comment on the issue:
       \`gh issue comment ${issueRef} --repo ${repoFullName} --body "Task complete. PR ready for review."\`
 6. If you are BLOCKED on something, comment on the issue and STOP.

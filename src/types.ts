@@ -148,6 +148,7 @@ export const ForgeConfigSchema = z.object({
   github: z.object({
     org: z.string(),
     default_visibility: z.enum(["public", "private"]).default("private"),
+    target_branch: z.string().default("main"),
     labels: z.array(LabelSchema).default([]),
   }),
   hosts: z.record(z.string(), HostConfigSchema),
