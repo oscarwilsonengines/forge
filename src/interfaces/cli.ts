@@ -17,6 +17,7 @@ import { HttpEngine } from "../execution/http-engine.js";
 import type { ExecutionEngine } from "../execution/engine.js";
 import { GitHubManager } from "../github/manager.js";
 import { ReviewPipeline } from "../review/pipeline.js";
+import { Deployer } from "../core/deployer.js";
 import { log } from "../utils/logger.js";
 import type { ForgeConfig, Plan, Task } from "../types.js";
 
@@ -495,6 +496,34 @@ program.command("notify").argument("<action>", "Notification action (test)")
     if (action !== "test") { log.error(`Unknown notify action: ${action}. Use 'test'.`); process.exit(1); }
     const config = loadConfig();
     await new Notifier(config.notifications, config.telegram).test();
+  });
+
+// forge deploy
+program.command("deploy").argument("[target]", "Deploy target name (optional — deploys to all if omitted)")
+  .description("Deploy to on-prem servers")
+  .action(async (target?: string) => {
+    const config = loadConfig();
+    const deployer = new Deployer(config);
+    const spinner = ora("Deploying...").start();
+    try {
+      if (target) {
+        const output = await deployer.deployTo(target);
+        spinner.succeed(`Deployed to ${target}`);
+        if (output) console.log(output);
+      } else {
+        const results = await deployer.deployAll();
+        const passed = results.filter(r => r.success).length;
+        const failed = results.filter(r => !r.success).length;
+        spinner.succeed(`Deployed: ${passed} succeeded, ${failed} failed`);
+        for (const r of results) {
+          console.log(`  ${r.success ? "✓" : "✗"} ${r.target}${r.output ? ": " + r.output.split("\n")[0] : ""}`);
+        }
+      }
+    } catch (err) {
+      spinner.fail("Deploy failed");
+      log.error(String(err));
+      process.exit(1);
+    }
   });
 
 program.parse();

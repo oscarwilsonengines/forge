@@ -16,6 +16,7 @@ import { RemoteEngine } from "../execution/remote-engine.js";
 import { HttpEngine } from "../execution/http-engine.js";
 import { GitHubManager } from "../github/manager.js";
 import { ReviewPipeline } from "../review/pipeline.js";
+import { Deployer } from "../core/deployer.js";
 import type { ForgeConfig, Plan, Task } from "../types.js";
 
 // ─── Service Factory ──────────────────────────────────────────
@@ -161,6 +162,14 @@ const TOOLS = [
       type: "object" as const,
       properties: { agentId: { type: "string", description: "The agent ID to restart" } },
       required: ["agentId"],
+    },
+  },
+  {
+    name: "forge_deploy",
+    description: "Deploy to on-prem servers. Pulls latest code, runs build commands.",
+    inputSchema: {
+      type: "object" as const,
+      properties: { target: { type: "string", description: "Deploy target name (optional — deploys to all if omitted)" } },
     },
   },
 ];
@@ -463,6 +472,18 @@ async function handleRestart(agentId: string): Promise<string> {
   return `Agent ${agentId} killed, task ${agent.task_id} returned to queue. Spawned ${spawned} new agent(s).`;
 }
 
+async function handleDeploy(target?: string): Promise<string> {
+  const config = loadConfig();
+  const deployer = new Deployer(config);
+  if (target) {
+    const output = await deployer.deployTo(target);
+    return `Deployed to ${target}.\n${output}`;
+  }
+  const results = await deployer.deployAll();
+  const lines = results.map(r => `${r.success ? "✓" : "✗"} ${r.target}: ${r.output.split("\n")[0] || "ok"}`);
+  return `Deploy complete:\n${lines.join("\n")}`;
+}
+
 // ─── MCP Server ───────────────────────────────────────────────
 
 const server = new Server(
@@ -495,6 +516,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "forge_checklist": result = await handleChecklist(); break;
       case "forge_restart":
         result = await handleRestart((args as { agentId: string }).agentId); break;
+      case "forge_deploy":
+        result = await handleDeploy((args as { target?: string }).target); break;
       default:
         return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
     }

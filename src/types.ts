@@ -191,6 +191,16 @@ export const ForgeConfigSchema = z.object({
       drives: z.record(z.string(), z.string()).default({}),
       projects_dir: z.string().default("C:\\Users\\zbonham\\source\\repos"),
     }).optional(),
+    targets: z.array(z.object({
+      name: z.string(),
+      type: z.enum(["ssh", "local"]),
+      host: z.string().optional(),
+      user: z.string().optional(),
+      key: z.string().optional(),
+      path: z.string(),
+      branch: z.string().default("main"),
+      commands: z.array(z.string()).default([]),
+    })).default([]),
   }).optional(),
   state: z.object({
     dir: z.string().default(".forge"),

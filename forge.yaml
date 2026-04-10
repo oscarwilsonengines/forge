@@ -90,6 +90,21 @@ deploy:
       W: "\\\\172.16.2.115\\scripts"        # Scripts, DynaChange
     projects_dir: "C:\\Users\\zbonham\\source\\repos"
 
+  # On-prem deploy targets — forge deploy pulls code to these servers
+  targets:
+    # - name: "cshelper-onprem"
+    #   type: "ssh"
+    #   host: "172.16.2.115"
+    #   user: "zbonham"
+    #   path: "/path/to/CSHelper"
+    #   branch: "v3"
+    #   commands:
+    #     - "git fetch origin"
+    #     - "git checkout v3"
+    #     - "git pull"
+    #     - "npm install"
+    #     - "npm run build"
+
 state:
   dir: ".forge"
   heartbeat_interval: 60
