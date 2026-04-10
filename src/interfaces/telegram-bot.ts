@@ -7,7 +7,7 @@ import { loadConfig } from "../config.js";
 import { StateManager } from "../core/state-manager.js";
 import { Scheduler } from "../core/scheduler.js";
 import { Notifier } from "../core/notifier.js";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { LocalEngine } from "../execution/local-engine.js";
 import { RemoteEngine } from "../execution/remote-engine.js";
 import { HttpEngine } from "../execution/http-engine.js";
@@ -703,10 +703,20 @@ function chatWithClaude(chatId: number, userMessage: string): string {
 
   const fullPrompt = `${systemPrompt}\n${conversationContext}User: ${userMessage}\n\nRespond concisely:`;
 
-  const rawOutput = execSync(
-    `claude --model ${config.agents.model} --max-turns 1 --output-format json -p ${JSON.stringify(fullPrompt)}`,
-    { encoding: "utf-8", timeout: 60_000, cwd: process.cwd() },
-  );
+  const result = spawnSync("claude", [
+    "--model", config.agents.model,
+    "--max-turns", "1",
+    "--output-format", "json",
+    "-p", "-",
+  ], {
+    input: fullPrompt,
+    encoding: "utf-8",
+    timeout: 60_000,
+    cwd: process.cwd(),
+  });
+  if (result.error) throw result.error;
+  const rawOutput = result.stdout;
+  if (!rawOutput) throw new Error(result.stderr || `claude exited with code ${result.status}`);
 
   try {
     const parsed = JSON.parse(rawOutput);
