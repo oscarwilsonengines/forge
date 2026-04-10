@@ -446,15 +446,14 @@ bot.onText(/\/plan(?:\s+(.+))?/, async (msg, match) => {
     const isRoot = process.getuid?.() === 0;
     const result = spawnSync("claude", [
       "--model", config.agents.boss_model,
-      "--max-turns", "5",
+      "--max-turns", "1",
       "--output-format", "json",
-      "--permission-mode", "bypassPermissions",
       "-p", "-",
     ], {
       input: buildPlanPrompt(description),
       encoding: "utf-8",
       timeout: 300_000,
-      cwd: active.path,
+      cwd: "/tmp",
       ...(isRoot ? { uid: 1001, gid: 1001 } : {}),
     });
 
