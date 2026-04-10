@@ -46,6 +46,11 @@ describe("buildSpecReviewPrompt", () => {
     expect(prompt).not.toContain("Verification Command");
   });
 
+  it("handles empty diff string", () => {
+    const prompt = buildSpecReviewPrompt(makeTask(), "");
+    expect(prompt).toContain("Spec Compliance Review");
+  });
+
   it("includes task title and description", () => {
     const prompt = buildSpecReviewPrompt(makeTask(), "diff");
     expect(prompt).toContain("Add auth middleware");

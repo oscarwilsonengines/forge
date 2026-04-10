@@ -1,7 +1,7 @@
 # forge.yaml — Forge orchestrator configuration
 
 github:
-  org: "ZbOscar"                             # GitHub org or user for new repos
+  org: "oscarwilsonengines"                    # GitHub org or user for new repos
   default_visibility: "private"
   labels:
     - { name: "forge:todo",        color: "0e8a16", description: "Ready for an agent" }

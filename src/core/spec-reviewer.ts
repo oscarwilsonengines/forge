@@ -17,8 +17,9 @@ export class SpecReviewer {
 
   /** Review a completed task's changes against its acceptance criteria */
   async review(task: Task, projectRoot: string): Promise<SpecReviewResult> {
-    const diff = this.getDiff(projectRoot);
-    if (!diff) return { pass: true, reasons: ["No changes detected — skipping review"] };
+    const { diff, error } = this.getDiff(projectRoot);
+    if (error) return { pass: false, reasons: [`Git diff failed: ${error}`] };
+    if (!diff) return { pass: false, reasons: ["No changes detected — diff is empty (check branch or working directory)"] };
 
     const prompt = buildSpecReviewPrompt(task, diff);
 
@@ -39,19 +40,20 @@ export class SpecReviewer {
       return this.parseResult(result.stdout);
     } catch (err) {
       log.warn(`Spec review failed for ${task.id}: ${err}`);
-      return { pass: true, reasons: ["Review process failed — passing by default"] };
+      return { pass: false, reasons: [`Review process error: ${err instanceof Error ? err.message : String(err)}`] };
     }
   }
 
-  private getDiff(projectRoot: string): string {
+  private getDiff(projectRoot: string): { diff: string; error?: string } {
     try {
-      return execSync("git diff main --no-color", {
+      const result = execSync("git diff main --no-color", {
         cwd: projectRoot,
         encoding: "utf-8",
         timeout: 30_000,
       }).trim();
-    } catch {
-      return "";
+      return { diff: result };
+    } catch (err) {
+      return { diff: "", error: err instanceof Error ? err.message : String(err) };
     }
   }
 

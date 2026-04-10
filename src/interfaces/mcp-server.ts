@@ -97,6 +97,18 @@ const TOOLS = [
     },
   },
   {
+    name: "forge_init",
+    description: "Initialize a project for Forge. Auto-detects state: creates GitHub repo if needed, pushes local-only repos, and bootstraps labels.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Absolute path to the project directory (defaults to cwd)" },
+        name: { type: "string", description: "Repository name (defaults to directory name)" },
+        description: { type: "string", description: "Repository description" },
+      },
+    },
+  },
+  {
     name: "forge_plan",
     description: "Create a plan from a project description. Calls Claude to decompose work into tasks and creates GitHub Issues.",
     inputSchema: {
@@ -200,6 +212,74 @@ function buildDesignPrompt(description: string): string {
 }
 
 // ─── Tool Handlers ────────────────────────────────────────────
+
+async function handleInit(targetRoot?: string, name?: string, description?: string): Promise<string> {
+  const { config, github, projectRoot } = createServices(targetRoot);
+  const steps: string[] = [];
+  const dirName = name || projectRoot.split(/[/\\]/).pop() || "project";
+  const desc = description || `${dirName} — managed by Forge`;
+
+  // 1. Detect git state
+  let hasGit = false;
+  try {
+    execSync("git rev-parse --git-dir", { stdio: "pipe", cwd: projectRoot });
+    hasGit = true;
+  } catch { /* no git */ }
+
+  // 2. Detect remote
+  let hasRemote = false;
+  let repoFullName: string | null = null;
+  if (hasGit) {
+    try {
+      const remote = execSync("git remote get-url origin", {
+        stdio: "pipe", cwd: projectRoot, encoding: "utf-8",
+      }).trim();
+      hasRemote = !!remote;
+    } catch { /* no remote */ }
+    github.setCwd(projectRoot);
+    repoFullName = github.getRepoFullName();
+  }
+
+  // 3. Act based on state
+  if (!hasGit) {
+    execSync("git init", { stdio: "pipe", cwd: projectRoot });
+    execSync('git add -A && git commit --allow-empty -m "Initial commit"', {
+      stdio: "pipe", cwd: projectRoot,
+    });
+    steps.push("Initialized git repository");
+    const repoSlug = `${config.github.org}/${dirName}`;
+    execSync(`gh repo create ${repoSlug} --private --description "${desc}" --source . --push`, {
+      stdio: "pipe", cwd: projectRoot, encoding: "utf-8",
+    });
+    repoFullName = repoSlug;
+    steps.push(`Created GitHub repo: ${repoSlug}`);
+  } else if (!hasRemote || !repoFullName) {
+    // On-prem only: create remote and push
+    try { execSync("git log -1", { stdio: "pipe", cwd: projectRoot }); }
+    catch { execSync('git add -A && git commit --allow-empty -m "Initial commit"', { stdio: "pipe", cwd: projectRoot }); }
+    const repoSlug = `${config.github.org}/${dirName}`;
+    execSync(`gh repo create ${repoSlug} --private --description "${desc}" --source . --push`, {
+      stdio: "pipe", cwd: projectRoot, encoding: "utf-8",
+    });
+    repoFullName = repoSlug;
+    steps.push(`Pushed local repo to GitHub: ${repoSlug}`);
+  } else {
+    steps.push(`Repository detected: ${repoFullName}`);
+  }
+
+  // 4. Bootstrap labels
+  if (repoFullName) {
+    github.setCwd(projectRoot);
+    github.bootstrapLabels(repoFullName);
+    steps.push("Forge labels bootstrapped");
+  }
+
+  // 5. Ensure .forge directory
+  const state = new StateManager(projectRoot);
+  steps.push(`State directory ready: ${state.forgeDir}`);
+
+  return `Forge initialized:\n${steps.map(s => `  - ${s}`).join("\n")}\n\nReady to plan. Run forge_plan to decompose work into tasks.`;
+}
 
 async function handleDesign(description: string, targetRoot?: string): Promise<string> {
   const { config, state, projectRoot } = createServices(targetRoot);
@@ -396,6 +476,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     let result: string;
     switch (name) {
+      case "forge_init":
+        const initArgs = args as { projectRoot?: string; name?: string; description?: string };
+            result = await handleInit(initArgs.projectRoot, initArgs.name, initArgs.description); break;
       case "forge_design":
         const designArgs = args as { description: string; projectRoot?: string };
             result = await handleDesign(designArgs.description, designArgs.projectRoot); break;

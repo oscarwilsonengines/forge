@@ -2,7 +2,7 @@
 import "dotenv/config";
 
 import { Command } from "commander";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execSync, spawnSync } from "node:child_process";
 import chalk from "chalk";
@@ -89,6 +89,30 @@ function buildPlanPrompt(description: string): string {
     "- Keep tasks focused: one module, one feature, one concern",
     "- Include test task per implementation task",
     "- Maximum 15 tasks",
+  ].join("\n");
+}
+
+function buildDesignPrompt(description: string): string {
+  return [
+    "You are a software architect. Your job is to explore a feature idea and produce a structured design spec.",
+    "", `Feature: ${description}`, "",
+    "Process:",
+    "1. Identify 2-3 possible approaches to implementing this feature",
+    "2. For each approach, describe: architecture, key components, trade-offs (pros/cons)",
+    "3. Recommend one approach with clear reasoning",
+    "4. Write a structured design spec for the recommended approach",
+    "",
+    "Output a markdown document with these sections:",
+    "# Design: [Feature Name]",
+    "## Approaches Considered",
+    "## Recommended Approach",
+    "## Architecture",
+    "## Components",
+    "## Data Flow",
+    "## Testing Strategy",
+    "## Open Questions",
+    "",
+    "Output ONLY the markdown document, no other text.",
   ].join("\n");
 }
 
@@ -191,6 +215,43 @@ program.command("init").argument("[repo]", "Repository (owner/repo) to clone and
     }
   });
 
+// forge design
+program.command("design").argument("<description>", "Description of feature to design")
+  .action(async (description: string) => {
+    const config = loadConfig();
+    const state = new StateManager(process.cwd());
+    const spinner = ora("Designing with Claude...").start();
+    try {
+      const prompt = buildDesignPrompt(description);
+      const result = spawnSync("claude", [
+        "--model", config.agents.boss_model,
+        "--max-turns", "5",
+        "-p", "-",
+      ], {
+        input: prompt,
+        encoding: "utf-8",
+        cwd: process.cwd(),
+        timeout: 300_000,
+      });
+      if (result.error) throw result.error;
+      let content = result.stdout;
+      if (!content) throw new Error(result.stderr || `claude exited with code ${result.status}`);
+      try {
+        const envelope = JSON.parse(content) as { result?: string };
+        if (typeof envelope.result === "string") content = envelope.result;
+      } catch { /* raw text */ }
+
+      const designPath = join(state.forgeDir, "design.md");
+      writeFileSync(designPath, content);
+      spinner.succeed(`Design saved to ${designPath}`);
+      console.log(content);
+      console.log(`\nRun ${chalk.cyan("forge plan")} to decompose into tasks.`);
+    } catch (err) {
+      spinner.fail("Design failed");
+      log.error(String(err)); process.exit(1);
+    }
+  });
+
 // forge plan
 program.command("plan").argument("<description>", "Description of work to plan")
   .action(async (description: string) => {
@@ -213,7 +274,7 @@ program.command("plan").argument("<description>", "Description of work to plan")
         message: "Which GitHub account should own this repo?",
         choices: [
           { name: "zanijr (personal)", value: "zanijr" },
-          { name: "ZbOscar (company)", value: "ZbOscar" },
+          { name: "oscarwilsonengines (company)", value: "oscarwilsonengines" },
         ],
       }]);
 
