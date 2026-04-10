@@ -703,16 +703,18 @@ function chatWithClaude(chatId: number, userMessage: string): string {
 
   const fullPrompt = `${systemPrompt}\n${conversationContext}User: ${userMessage}\n\nRespond concisely:`;
 
+  const active = getActiveTarget(chatId);
   const result = spawnSync("claude", [
     "--model", config.agents.model,
-    "--max-turns", "1",
+    "--max-turns", "5",
     "--output-format", "json",
+    "--permission-mode", "bypassPermissions",
     "-p", "-",
   ], {
     input: fullPrompt,
     encoding: "utf-8",
-    timeout: 60_000,
-    cwd: process.cwd(),
+    timeout: 120_000,
+    cwd: active.path,
   });
   if (result.error) throw result.error;
   const rawOutput = result.stdout;
@@ -720,6 +722,10 @@ function chatWithClaude(chatId: number, userMessage: string): string {
 
   try {
     const parsed = JSON.parse(rawOutput);
+    if (parsed.is_error) {
+      const reason = typeof parsed.result === "string" ? parsed.result : "Unknown error";
+      return `I couldn't complete that: ${reason}`;
+    }
     return typeof parsed.result === "string" ? parsed.result : rawOutput.trim();
   } catch {
     return rawOutput.trim();
